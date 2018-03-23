@@ -8,9 +8,14 @@
 #include <unistd.h>
 #include <pwd.h>
 
+#define DIR_LEN 256
+#define HASH_DIR_LEN 3
+
+char root_dir[DIR_LEN];
+
 char *sha1_hash(char *input_url, char *hashed_url)
 {
-  if((!input_url) || (!hashed_url))
+  if((!input_url) || (!hashed_url)) //parameter check
     return 0;
 
   unsigned char hashed_160bits[20];
@@ -24,6 +29,7 @@ char *sha1_hash(char *input_url, char *hashed_url)
     fputs("SHA1() error!\n", stderr);
   }
 
+  //write 16bit hex value from SHA1 method descryption
   for(i=0; i<sizeof(hashed_160bits); i++)
     sprintf(hashed_hex + i*2, "%02x", hashed_160bits[i]);
 
@@ -46,23 +52,22 @@ int makeDir(char *src_url)
 {
   if(!src_url) return -1;
 
-  char root_dir[20] = "/cache";  //concaternate for root dir name var
-  char create_dir[10];  //creating new directory name var
+  char create_dir[DIR_LEN];  //creating new directory name var
+  char cp_root[DIR_LEN];
   char *working = 0; //write working dir var
   int i;
 
-  working = (char*)malloc(sizeof(char) * 256);
-  if(!working){fputs("in makeDir() malloc() error!\n", stderr); return -1;}
+  memcpy(cp_root, root_dir, sizeof(cp_root));
 
-  if(getHomeDir(working)){ //pwd is home directory /home/yun
-    //change directory into cache
-    strcat(working, root_dir);
+  if(cp_root){ //pwd is home directory /home/yuncreate_dir[3] = '\0';
+
 
     //create new directory name 3 character
-    strncpy(create_dir, src_url, 3);
+    memcpy(create_dir, src_url, HASH_DIR_LEN);
     create_dir[3] = '\0';
 
-    umask(0000);  //permission setting for 777
+    //permission setting for 777
+    umask(000);
     if(0 > mkdir(create_dir, S_IRWXU | S_IRWXG | S_IRWXO)){
       fputs("in makeDir(), mkdir() error!", stderr);
     }
@@ -77,12 +82,16 @@ int makeDir(char *src_url)
 int main(int argc, char* argv[])
 {
   char *input_url = 0, *hashed_url = 0;
+  char temp[DIR_LEN] = "/cache";  //concaternate for root dir name var
 
-  input_url = (char*)malloc(sizeof(char)*255);
-  hashed_url = (char*)malloc(sizeof(char)*255);
+  input_url = (char*)malloc(sizeof(char)*DIR_LEN);
+  hashed_url = (char*)malloc(sizeof(char)*DIR_LEN);
   if(!(input_url) || !(hashed_url))
     fputs("in main(), malloc() error!", stderr);
 
+  //root directory setting
+  getHomeDir(root_dir);
+  strcat(root_dir, temp);
 
   while(1){
     printf("input URL> ");
