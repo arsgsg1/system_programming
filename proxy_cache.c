@@ -83,11 +83,19 @@ int makeDir(char *src_url)
 int createFile(char *src_url)
 {
   char path[DIR_LEN]; //root directory path
-  char buf[DIR_LEN];  //file name
+  char buf[DIR_LEN]; char old_path[DIR_LEN];  //file name
   int fd;
-  memcpy(path, root_dir, sizeof(root_dir));
+  memcpy(path, root_dir, sizeof(root_dir)); //ex) ~
 
-//해쉬문자열 이름의 파일이 ~/cache 밑에 바로 생성되는 문제가 있음
+  memcpy(old_path, path, sizeof(path)); //back up parent directory
+  strncat(path, "/", 1);
+  strncat(path, src_url, HASH_DIR_LEN);  //ex)pwd : ~/ef0 ...
+  //present working directory is ~/cache, position of file is ~/cache
+  //so, working directory of process change '~/cache/ef0...'
+  if(0 > chdir(path)){
+    fputs("in createFile() chdir() error!\n", stderr);
+    return -1;
+  }
   memcpy(buf, src_url+HASH_DIR_LEN, (sizeof(char)*DIR_LEN)-HASH_DIR_LEN);
   //write mode | when no exist file, create file | when file exist, stop func
   if(0 > (fd = open(buf, O_WRONLY | O_CREAT))){
@@ -99,6 +107,10 @@ int createFile(char *src_url)
   //Write File logic, when you want write file, using 'write' func
   //write();
 
+  if(0 > chdir(old_path)){  //ex)pwd : ~/
+    fputs("in createFile() chdir() error!\n", stderr);
+    return -1;
+  }
   close(fd);
   return 1;
 }
@@ -144,7 +156,7 @@ int main(int argc, char* argv[])
   if(!(input_url) || !(hashed_url))
     fputs("in main(), malloc() error!", stderr);
 
-  //root directory setting | O_EXCL
+  //root directory setting
   getHomeDir(root_dir);
   strcat(root_dir, temp);
 
