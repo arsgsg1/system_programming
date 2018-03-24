@@ -101,23 +101,23 @@ int createFile(char *src_url)
   return 1;
 }
 /*
-  functionName: readDir
+  functionName: isHit
   descryption : 인자로 넘겨준 해싱된 URL에 대하여 directory가 이미 생성되었는지
   확인하고 createFile이 두 번 이상 호출되 | O_EXCL는 것을 방지하기 위한 함수 (루트 디렉토리 안에서)
   parameter : hashed_url
   returnValue : 0 = 생성되어 있지 않음, 1 = 생성되어 있음, -1 = error
 */
-int readDir(char *src_url)
+int isHit(char *src_url)
 {
   char path[DIR_LEN];
   char buf_dir[DIR_LEN];
   struct dirent *pFile;
   DIR *pDir;
-  if(!src_url){fputs("in readDir() parameter is null!\n", stderr); return -1;}
+  if(!src_url){fputs("in isHit() parameter is null!\n", stderr); return -1;}
   memcpy(path, root_dir, sizeof(root_dir));
 
   if(NULL == (pDir = opendir(path))){
-    fputs("in readFile(), opendir() error!\n", stderr);
+    fputs("in isHit(), opendir() error!\n", stderr);
     return -1;
   }
   for(pFile=readdir(pDir); pFile; pFile=readdir(pDir)){
@@ -159,10 +159,15 @@ int main(int argc, char* argv[])
   if(!(input_url) || !(hashed_url))
     fputs("in main(), malloc() error!", stderr);
 
+  strcpy(path, temp+1);
+  umask(000);
+  mkdir(path, S_IRWXU | S_IRWXG | S_IRWXO);
+
   //root directory setting
   getHomeDir(root_dir);
   strcat(root_dir, temp);
   memcpy(path, root_dir, sizeof(root_dir));
+  chdir(path);
 
   while(1){
     printf("input URL> ");
@@ -174,7 +179,7 @@ int main(int argc, char* argv[])
     if(hashed_url)
         printf("%s\n", hashed_url);
 
-    if(0 == readDir(hashed_url)){
+    if(0 == isHit(hashed_url)){
       makeDir(hashed_url);
 
       if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
