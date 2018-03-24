@@ -44,7 +44,7 @@ char *getHomeDir(char *home){
   strcpy(home, usr_info->pw_dir);
 
   return home;
-}
+}  //cd ~/caache/ef0
 /*
 파라미터로 들어온 url에 대하여 앞 3글자만 토크나이징하여 디렉토리를 만드는 함수이다.
 비고 : 생성한 모든 디렉토리는 모든 권한을 갖도록 구현한다. 즉, 8진수로 777 할당
@@ -76,26 +76,16 @@ int makeDir(char *src_url)
 }
 /*
   createFile
+  descryption : 해싱된 URL을 가지고 파일을 만드는 함수
   parameter : 해싱된 URL
   returnValue : -1 = error, 1 = file make
   비고 : 파일 생성시 다양한 함수 사용가능,
 */
 int createFile(char *src_url)
 {
-  char path[DIR_LEN]; //root directory path
-  char buf[DIR_LEN]; char old_path[DIR_LEN];  //file name
+  char buf[DIR_LEN];  //file name
   int fd;
-  memcpy(path, root_dir, sizeof(root_dir)); //ex) ~
-  
-  memcpy(old_path, path, sizeof(path)); //back up parent directory
-  strncat(path, "/", 1);
-  strncat(path, src_url, HASH_DIR_LEN);  //ex)pwd : ~/ef0 ...
-  //present working directory is ~/cache, position of file is ~/cache
-  //so, working directory of process change '~/cache/ef0...'
-  if(0 > chdir(path)){
-    fputs("in createFile() chdir() error!\n", stderr);
-    return -1;
-  }
+
   memcpy(buf, src_url+HASH_DIR_LEN, (sizeof(char)*DIR_LEN)-HASH_DIR_LEN);
   //write mode | when no exist file, create file | when file exist, stop func
   if(0 > (fd = open(buf, O_WRONLY | O_CREAT))){
@@ -107,10 +97,6 @@ int createFile(char *src_url)
   //Write File logic, when you want write file, using 'write' func
   //write();
 
-  if(0 > chdir(old_path)){  //ex)pwd : ~/
-    fputs("in createFile() chdir() error!\n", stderr);
-    return -1;
-  }
   close(fd);
   return 1;
 }
@@ -145,11 +131,28 @@ int readDir(char *src_url)
   return 0;
 }
 
+int changeDir(char *src_url)
+{
+  char path[DIR_LEN];
+  char buf[DIR_LEN];
+  char work[DIR_LEN];
+  memset(path, 0, sizeof(path));
+  memset(buf, 0, sizeof(buf));
+
+  memcpy(path, root_dir, sizeof(root_dir));
+  memcpy(buf, src_url, HASH_DIR_LEN);
+  sprintf(work, "%s/%s", path, buf);
+
+  //present working directory is ~/cache, position of file is ~/cache
+  //so, working directory of process change '~/cache/ef0...'
+  if(0 > chdir(work)){fputs("in changeDir() chdir() error\n", stderr); return -1;}
+  return 1;
+}
 
 int main(int argc, char* argv[])
 {
   char *input_url = 0, *hashed_url = 0;
-  char temp[DIR_LEN] = "/cache";  //concaternate for root dir name var
+  char temp[DIR_LEN] = "/cache", path[DIR_LEN];  //concaternate for root dir name var
 
   input_url = (char*)malloc(sizeof(char)*DIR_LEN);
   hashed_url = (char*)malloc(sizeof(char)*DIR_LEN);
@@ -159,6 +162,7 @@ int main(int argc, char* argv[])
   //root directory setting
   getHomeDir(root_dir);
   strcat(root_dir, temp);
+  memcpy(path, root_dir, sizeof(root_dir));
 
   while(1){
     printf("input URL> ");
@@ -172,7 +176,10 @@ int main(int argc, char* argv[])
 
     if(0 == readDir(hashed_url)){
       makeDir(hashed_url);
+
+      if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
       createFile(hashed_url);
+      chdir(path);  //cd ~/cache/
     }
   }
   if(input_url) free(input_url);
