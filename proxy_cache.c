@@ -85,9 +85,16 @@ int createFile(char *src_url)
   char path[DIR_LEN]; //root directory path
   char buf[DIR_LEN];  //file name
   int fd;
-  memcpy(path, root_dir, sizeof(root_dir));
+  memcpy(path, root_dir, sizeof(root_dir)); //ex) ~
 
-//해쉬문자열 이름의 파일이 ~/cache 밑에 바로 생성되는 문제가 있음
+  strncat(path, "/", 1);
+  strncat(path, src_url, HASH_DIR_LEN);  //ex) ~/ef0 ...
+  //present working directory is ~/cache, position of file is ~/cache
+  //so, working directory of process change '~/cache/ef0...'
+  if(0 > chdir(path)){
+    fputs("in createFile() chdir() error!\n", stderr);
+    return -1;
+  }
   memcpy(buf, src_url+HASH_DIR_LEN, (sizeof(char)*DIR_LEN)-HASH_DIR_LEN);
   //write mode | when no exist file, create file | when file exist, stop func
   if(0 > (fd = open(buf, O_WRONLY | O_CREAT))){
@@ -105,7 +112,7 @@ int createFile(char *src_url)
 /*
   functionName: readDir
   descryption : 인자로 넘겨준 해싱된 URL에 대하여 directory가 이미 생성되었는지
-  확인하고 createFile이 두 번 이상 호출되는 것을 방지하기 위한 함수 (루트 디렉토리 안에서)
+  확인하고 createFile이 두 번 이상 호출되 | O_EXCL는 것을 방지하기 위한 함수 (루트 디렉토리 안에서)
   parameter : hashed_url
   returnValue : 0 = 생성되어 있지 않음, 1 = 생성되어 있음, -1 = error
 */
@@ -144,7 +151,7 @@ int main(int argc, char* argv[])
   if(!(input_url) || !(hashed_url))
     fputs("in main(), malloc() error!", stderr);
 
-  //root directory setting | O_EXCL
+  //root directory setting
   getHomeDir(root_dir);
   strcat(root_dir, temp);
 
