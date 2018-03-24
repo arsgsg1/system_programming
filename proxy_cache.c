@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,18 +54,16 @@ int makeDir(char *src_url)
   if(!src_url) return -1;
 
   char create_dir[DIR_LEN];  //creating new directory name var
-  char cp_root[DIR_LEN];
-  char *working = 0; //write working dir var
+  char path[DIR_LEN];
   int i;
 
-  memcpy(cp_root, root_dir, sizeof(cp_root));
+  memcpy(path, root_dir, sizeof(path));
 
-  if(cp_root){ //pwd is home directory /home/yuncreate_dir[3] = '\0';
-
+  if(path){ //pwd is home directory /home/yuncreate_dir[3] = '\0';
 
     //create new directory name 3 character
     memcpy(create_dir, src_url, HASH_DIR_LEN);
-    create_dir[3] = '\0';
+    create_dir[HASH_DIR_LEN] = '\0';
 
     //permission setting for 777
     umask(000);
@@ -73,10 +72,66 @@ int makeDir(char *src_url)
     }
   }
 
-  if(working) free(working);
   return 1;
 }
+/*
+  createFile
+  parameter : 해싱된 URL
+  returnValue : -1 = error, 1 = file make
+  비고 : 파일 생성시 다양한 함수 사용가능,
+*/
+int createFile(char *src_url)
+{
+  char path[DIR_LEN]; //root directory path
+  char buf[DIR_LEN];  //file name
+  int fd;
+  memcpy(path, root_dir, sizeof(root_dir));
 
+//해쉬문자열 이름의 파일이 ~/cache 밑에 바로 생성되는 문제가 있음
+  memcpy(buf, src_url+HASH_DIR_LEN, (sizeof(char)*DIR_LEN)-HASH_DIR_LEN);
+  //write mode | when no exist file, create file | when file exist, stop func
+  if(0 > (fd = open(buf, O_WRONLY | O_CREAT))){
+    //when you know error to spacify cause, using 'errno'
+    fputs("in createFile(), open() error", stderr);
+    return -1;
+  }
+
+  //Write File logic, when you want write file, using 'write' func
+  //write();
+
+  close(fd);
+  return 1;
+}
+/*
+  functionName: readDir
+  descryption : 인자로 넘겨준 해싱된 URL에 대하여 directory가 이미 생성되었는지
+  확인하고 createFile이 두 번 이상 호출되는 것을 방지하기 위한 함수 (루트 디렉토리 안에서)
+  parameter : hashed_url
+  returnValue : 0 = 생성되어 있지 않음, 1 = 생성되어 있음, -1 = error
+*/
+int readDir(char *src_url)
+{
+  char path[DIR_LEN];
+  char buf_dir[DIR_LEN];
+  struct dirent *pFile;
+  DIR *pDir;
+  if(!src_url){fputs("in readDir() parameter is null!\n", stderr); return -1;}
+  memcpy(path, root_dir, sizeof(root_dir));
+
+  if(NULL == (pDir = opendir(path))){
+    fputs("in readFile(), opendir() error!\n", stderr);
+    return -1;
+  }
+  for(pFile=readdir(pDir); pFile; pFile=readdir(pDir)){
+    memcpy(buf_dir, src_url, HASH_DIR_LEN);
+    if(0 == strcmp(buf_dir, pFile->d_name)){
+      return 1;
+    }
+  }
+
+  closedir(pDir);
+  return 0;
+}
 
 
 int main(int argc, char* argv[])
@@ -89,7 +144,7 @@ int main(int argc, char* argv[])
   if(!(input_url) || !(hashed_url))
     fputs("in main(), malloc() error!", stderr);
 
-  //root directory setting
+  //root directory setting | O_EXCL
   getHomeDir(root_dir);
   strcat(root_dir, temp);
 
@@ -103,8 +158,9 @@ int main(int argc, char* argv[])
     if(hashed_url)
         printf("%s\n", hashed_url);
 
-    if(0 > makeDir(hashed_url)){
-      fputs("makeDir() parameter error!", stderr);
+    if(0 == readDir(hashed_url)){
+      makeDir(hashed_url);
+      createFile(hashed_url);
     }
   }
   if(input_url) free(input_url);
