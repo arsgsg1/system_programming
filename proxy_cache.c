@@ -1,3 +1,14 @@
+///////////////////////////////////////////////////////////////////
+//  File name : proxy_cache.c                                    //
+//  Date  : 2018/03/25                                           //
+//  Os    : Ubuntu 16.04 LTS 64bits                              //
+//  Author  : Yun Joa Houng                                      //
+//  Student ID  : 2015722052                                     //
+//  ---------------------------------                            //
+//  Title : System Programming Assignment #1-1 (proxy server)    //
+//  Descryption : user input url, programe is hashing input url  //
+//                and create directory, file from hashed url     //
+///////////////////////////////////////////////////////////////////
 #include <dirent.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -9,11 +20,19 @@
 #include <unistd.h>
 #include <pwd.h>
 
-#define DIR_LEN 256
-#define HASH_DIR_LEN 3
+#define DIR_LEN 256      //buffer size
+#define HASH_DIR_LEN 3   //directory size
 
-char root_dir[DIR_LEN];
-
+char root_dir[DIR_LEN]; //present working directory
+///////////////////////////////////////////////////////
+//  sha1_hash                                        //
+//  ==============================================   //
+//  Input: char *input_url -> hashing source url     //
+//               hashed_url -> hashed destination url//
+//  Output: char* ->  hashed url                     //
+//          NULL  ->  error                          //
+//  Purpos: string hash function                     //
+///////////////////////////////////////////////////////
 char *sha1_hash(char *input_url, char *hashed_url)
 {
   if((!input_url) || (!hashed_url)) //parameter check
@@ -28,6 +47,7 @@ char *sha1_hash(char *input_url, char *hashed_url)
 
   if(0 == SHA1(input_url, strlen(input_url), hashed_160bits)){
     fputs("SHA1() error!\n", stderr);
+    return 0;
   }
 
   //write 16bit hex value from SHA1 method descryption
@@ -38,17 +58,27 @@ char *sha1_hash(char *input_url, char *hashed_url)
 
   return hashed_url;
 }
-
+/////////////////////////////////////////////////////////
+// getHomeDir                                          //
+// =================================================   //
+// Input: char* -> home directory name for search      //
+// Output: char * -> home directory                    //
+// Purpose: getting home directory                     //
+/////////////////////////////////////////////////////////
 char *getHomeDir(char *home){
   struct passwd *usr_info = getpwuid(getuid());
   strcpy(home, usr_info->pw_dir);
 
   return home;
-}  //cd ~/caache/ef0
-/*
-파라미터로 들어온 url에 대하여 앞 3글자만 토크나이징하여 디렉토리를 만드는 함수이다.
-비고 : 생성한 모든 디렉토리는 모든 권한을 갖도록 구현한다. 즉, 8진수로 777 할당
-*/
+}
+
+//////////////////////////////////////////////////////
+//  makeDir                                         //
+//  ==============================================  //
+//  Input: char* src_url  ->  hashed url            //
+//  Output: int ->  -1  fail                        //
+//              ->  1   success                     //
+//////////////////////////////////////////////////////
 int makeDir(char *src_url)
 {
   if(!src_url) return -1;
@@ -74,13 +104,14 @@ int makeDir(char *src_url)
 
   return 1;
 }
-/*
-  createFile
-  descryption : 해싱된 URL을 가지고 파일을 만드는 함수
-  parameter : 해싱된 URL
-  returnValue : -1 = error, 1 = file make
-  비고 : 파일 생성시 다양한 함수 사용가능,
-*/
+
+//////////////////////////////////////////////////////////
+//  createFile                                          //
+//  ==================================================  //
+//  Input:  char* src_url ->  hashed url                //
+//  Output: int ->  -1 fail                             //
+//  Purpose:  making file from hashed url               //
+//////////////////////////////////////////////////////////
 int createFile(char *src_url)
 {
   char buf[DIR_LEN];  //file name
@@ -100,13 +131,16 @@ int createFile(char *src_url)
   close(fd);
   return 1;
 }
-/*
-  functionName: isHit
-  descryption : 인자로 넘겨준 해싱된 URL에 대하여 directory가 이미 생성되었는지
-  확인하고 createFile이 두 번 이상 호출되 | O_EXCL는 것을 방지하기 위한 함수 (루트 디렉토리 안에서)
-  parameter : hashed_url
-  returnValue : 0 = 생성되어 있지 않음, 1 = 생성되어 있음, -1 = error
-*/
+
+////////////////////////////////////////////////////
+//  isHit                                         //
+//  ===========================================   //
+//  Input:  char* src_url ->  hashed url          //
+//  Output: int ->  -1  fail                      //
+//                  1   exist                     //
+//                  0   no exist                  //
+//  Purpose:  read directory, search file to exist//
+////////////////////////////////////////////////////
 int isHit(char *src_url)
 {
   char path[DIR_LEN];
@@ -130,12 +164,21 @@ int isHit(char *src_url)
   closedir(pDir);
   return 0;
 }
-
+//////////////////////////////////////////////////////////////////
+//  changeDir                                                   //
+//  ================================                            //
+//  Input: char* src_url  ->  hashed_url                        //
+//  Output: int ->  -1  fail                                    //
+//              ->  1   success                                 //
+//  Purpose:  Change present working directory for create file  //
+//            (from hashed url)                                 //
+//////////////////////////////////////////////////////////////////
 int changeDir(char *src_url)
 {
   char path[DIR_LEN];
   char buf[DIR_LEN];
   char work[DIR_LEN];
+  if(!src_url){fputs("in changeDir() parameter error\n", stderr); return -1;}
   memset(path, 0, sizeof(path));
   memset(buf, 0, sizeof(buf));
 
