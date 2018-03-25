@@ -218,9 +218,9 @@ int main(int argc, char* argv[])
     if(0 == strcmp(input_url, "bye")){
       break;
     }
-    sha1_hash(input_url, hashed_url);
-    if(hashed_url)
-        printf("%s\n", hashed_url);
+    if(0 == sha1_hash(input_url, hashed_url))
+      fputs("sha1_hash() failed\n", stderr);
+
 
     if(0 == isHit(hashed_url)){
       makeDir(hashed_url);
