@@ -202,14 +202,13 @@ int main(int argc, char* argv[])
   if(!(input_url) || !(hashed_url))
     fputs("in main(), malloc() error!", stderr);
 
-  strcpy(path, temp+1);
-  umask(000);
-  mkdir(path, S_IRWXU | S_IRWXG | S_IRWXO);
-
   //root directory setting
   getHomeDir(root_dir);
   strcat(root_dir, temp);
   memcpy(path, root_dir, sizeof(root_dir));
+
+  umask(000);
+  mkdir(path, S_IRWXU | S_IRWXG | S_IRWXO);
   chdir(path);
 
   while(1){
