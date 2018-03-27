@@ -96,7 +96,7 @@ int makeDir(char *src_url)
     create_dir[HASH_DIR_LEN] = '\0';
 
     //permission setting for 777
-    umask(000);
+    umask(0000);
     if(0 > mkdir(create_dir, S_IRWXU | S_IRWXG | S_IRWXO)){
       fputs("in makeDir(), mkdir() error!", stderr);
     }
@@ -145,23 +145,34 @@ int isHit(char *src_url)
 {
   char path[DIR_LEN];
   char buf_dir[DIR_LEN];
-  struct dirent *pFile;
-  DIR *pDir;
+  struct dirent *pFileTop=NULL, *pFileDown=NULL;
+  DIR *pDirTop=NULL, *pDirDown=NULL;
   if(!src_url){fputs("in isHit() parameter is null!\n", stderr); return -1;}
   memcpy(path, root_dir, sizeof(root_dir));
+  memcpy(buf_dir, src_url, HASH_DIR_LEN);
 
-  if(NULL == (pDir = opendir(path))){
+  if(NULL == (pDirTop = opendir(path))){
     fputs("in isHit(), opendir() error!\n", stderr);
     return -1;
   }
-  for(pFile=readdir(pDir); pFile; pFile=readdir(pDir)){
-    memcpy(buf_dir, src_url, HASH_DIR_LEN);
-    if(0 == strcmp(buf_dir, pFile->d_name)){
-      return 1;
+
+  for(pFileTop=readdir(pDirTop); pFileTop; pFileTop=readdir(pDirTop)){
+    if(0 == strcmp(buf_dir, pFileTop->d_name)){
+      if(NULL == (pDirDown = opendir(pFileTop->d_name))){fputs("in isHit(), opendir() error!\n", stderr); break;}
+      for(pFileDown=readdir(pDirDown); pFileDown; pFileDown=readdir(pDirDown)){
+        if(0 == strcmp(src_url+3, pFileDown->d_name)){
+
+          if(pDirDown){closedir(pDirDown); pDirDown=NULL;}
+          if(pDirTop){closedir(pDirTop); pDirTop=NULL;}
+
+          return 1;
+        }
+      }
+      closedir(pDirDown);
     }
   }
-
-  closedir(pDir);
+  if(pDirDown){closedir(pDirDown); pDirDown=NULL;}
+  if(pDirTop){closedir(pDirTop); pDirTop=NULL;}
   return 0;
 }
 //////////////////////////////////////////////////////////////////
