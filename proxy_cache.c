@@ -17,11 +17,22 @@
 #include <openssl/sha.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 #include <pwd.h>
 
 #define DIR_LEN 256      //buffer size
 #define HASH_DIR_LEN 3   //directory size
+#define DEF_HIT 1
+#define DEF_MISS  0
+#define DEF_TER -1
+typedef struct _CACHE_ATTR{
+  int hit;
+  int miss;
+  int flag;
+  time_t start;
+  struct tm *gtp;
+}CACHE_ATTR;
 
 char root_dir[DIR_LEN]; //present working directory
 ///////////////////////////////////////////////////////
@@ -202,11 +213,56 @@ int changeDir(char *src_url)
   if(0 > chdir(work)){fputs("in changeDir() chdir() error\n", stderr); return -1;}
   return 1;
 }
+/*
+writeLog
+input_url, hashed_url, log에 기록할 정보 구조체, 로그파일을 open한 file descrypter
+return -> int value -> 0 success
+*/
+int writeLog(char *input_url, char *src_url, CACHE_ATTR *cache_attr, int fd)
+{
+  char path[DIR_LEN], log[DIR_LEN*4];
+  char hash_dir[HASH_DIR_LEN+1], hash_file[DIR_LEN];
+  time_t now;
+  struct tm *logTime;
 
+  memset(path, 0, sizeof(path));
+  memset(log, 0, sizeof(log));
+  memset(hash_dir, 0, sizeof(hash_dir));
+  memset(hash_file, 0, sizeof(hash_file));
+
+  //initialized logging time
+  time(&now);
+  logTime = localtime(&now);
+  //if 1=Hit, 0=Miss, -1=Terminated
+  if(DEF_HIT == cache_attr->flag){  //if Hit
+    memcpy(hash_dir, src_url, HASH_DIR_LEN);
+    memcpy(hash_file, src_url+3, DIR_LEN-3);
+
+    sprintf(log, "[%s]%s/%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n", "Hit", hash_dir, hash_file,
+  (logTime->tm_year+1900), (logTime->tm_mon+1), logTime->tm_mday,logTime->tm_hour ,logTime->tm_min, logTime->tm_sec);
+    write(fd, log, strlen(log));
+
+    memset(log, 0, sizeof(log));
+    sprintf(log, "[%s]%s\n", "Hit", input_url);
+    write(fd, log, strlen(log));
+  }else if(DEF_MISS == cache_attr->flag){  //if Miss
+    sprintf(log, "[%s]%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n", "Miss", input_url, (logTime->tm_year+1900), (logTime->tm_mon+1),
+  logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
+    write(fd, log, strlen(log));
+  }else if(DEF_TER == cache_attr->flag){ //if Terminated
+    sprintf(log, "[%s] run time: %02d sec. #request hit : %02d, miss : %02d\n", "Terminated",
+     now-cache_attr->start, cache_attr->hit, cache_attr->miss);
+    write(fd, log, strlen(log));
+  }
+
+  return 0;
+}
 int main(int argc, char* argv[])
 {
+  int fd; //logfile file descrypter
   char *input_url = 0, *hashed_url = 0;
-  char temp[DIR_LEN] = "/cache", path[DIR_LEN];  //concaternate for root dir name var
+  char temp[DIR_LEN] = "/cache", path[DIR_LEN], logPath[DIR_LEN]="/logfile";  //concaternate for root dir name var
+  CACHE_ATTR cache_attr;
 
   input_url = (char*)malloc(sizeof(char)*DIR_LEN);
   hashed_url = (char*)malloc(sizeof(char)*DIR_LEN);
@@ -218,29 +274,54 @@ int main(int argc, char* argv[])
   strcat(root_dir, temp);
   memcpy(path, root_dir, sizeof(root_dir));
 
-  umask(000);
+  //root driectory logic
+  umask(0000);
   mkdir(path, S_IRWXU | S_IRWXG | S_IRWXO);
   chdir(path);
+
+  //logfile logic(make logfile directory, time info init)
+  memset(&cache_attr, 0, sizeof(cache_attr));
+  time(&cache_attr.start); //initialized program start time
+  cache_attr.gtp = gmtime(&cache_attr.start);
+  getHomeDir(temp);
+  umask(0000);
+  sprintf(temp, "%s/%s", temp, "logfile");
+  mkdir(temp, S_IRWXU | S_IRWXG | S_IRWXO);
+
+  //create logfile(~/logfile/logfile.txt)
+  sprintf(temp, "%s/%s", temp, "/logfile.txt"); // path is ~/logfile/logfile.txt
+  if(0 > (fd = open(temp, O_RDWR | O_CREAT | O_APPEND, 0777)))
+    fputs("in main() open() error!", stderr);
+
 
   while(1){
     printf("input URL> ");
     scanf("%s", input_url);
     if(0 == strcmp(input_url, "bye")){
+      cache_attr.flag = DEF_TER;
+      writeLog(input_url, hashed_url, &cache_attr, fd);
+      close(fd);
       break;
     }
     if(0 == sha1_hash(input_url, hashed_url))
       fputs("sha1_hash() failed\n", stderr);
 
-
     if(0 == isHit(hashed_url)){
+      cache_attr.miss += 1;
+      cache_attr.flag = DEF_MISS;
       makeDir(hashed_url);
 
       if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
       createFile(hashed_url);
       chdir(path);  //cd ~/cache/
+    }else{
+      cache_attr.hit += 1;
+      cache_attr.flag = DEF_HIT;
     }
+    writeLog(input_url, hashed_url, &cache_attr, fd);
   }
   if(input_url) free(input_url);
   if(hashed_url) free(hashed_url);
+
   return 0;
 }
