@@ -130,7 +130,7 @@ int createFile(char *src_url)
 
   memcpy(buf, src_url+HASH_DIR_LEN, (sizeof(char)*DIR_LEN)-HASH_DIR_LEN);
   //write mode | when no exist file, create file | when file exist, stop func
-  if(0 > (fd = open(buf, O_WRONLY | O_CREAT))){
+  if(0 > (fd = open(buf, O_RDWR | O_CREAT))){
     //when you know error to spacify cause, using 'errno'
     fputs("in createFile(), open() error", stderr);
     return -1;
@@ -179,7 +179,6 @@ int isHit(char *src_url)
           return 1;
         }
       }
-      closedir(pDirDown);
     }
   }
   if(pDirDown){closedir(pDirDown); pDirDown=NULL;}
@@ -218,51 +217,43 @@ writeLog
 input_url, hashed_url, log에 기록할 정보 구조체, 로그파일을 open한 file descrypter
 return -> int value -> 0 success
 */
-int writeLog(char *input_url, char *src_url, CACHE_ATTR *cache_attr, int fd)
+int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *fp)
 {
-  char path[DIR_LEN], log[DIR_LEN*4];
   char hash_dir[HASH_DIR_LEN+1], hash_file[DIR_LEN];
   time_t now;
   struct tm *logTime;
 
-  memset(path, 0, sizeof(path));
-  memset(log, 0, sizeof(log));
-  memset(hash_dir, 0, sizeof(hash_dir));
-  memset(hash_file, 0, sizeof(hash_file));
-
-  //initialized logging time
-  time(&now);
-  logTime = localtime(&now);
-  //if 1=Hit, 0=Miss, -1=Terminated
-  if(DEF_HIT == cache_attr->flag){  //if Hit
-    memcpy(hash_dir, src_url, HASH_DIR_LEN);
-    memcpy(hash_file, src_url+3, DIR_LEN-3);
-
-    sprintf(log, "[%s]%s/%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n", "Hit", hash_dir, hash_file,
-  (logTime->tm_year+1900), (logTime->tm_mon+1), logTime->tm_mday,logTime->tm_hour ,logTime->tm_min, logTime->tm_sec);
-    write(fd, log, strlen(log));
-
-    memset(log, 0, sizeof(log));
-    sprintf(log, "[%s]%s\n", "Hit", input_url);
-    write(fd, log, strlen(log));
-  }else if(DEF_MISS == cache_attr->flag){  //if Miss
-    sprintf(log, "[%s]%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n", "Miss", input_url, (logTime->tm_year+1900), (logTime->tm_mon+1),
-  logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
-    write(fd, log, strlen(log));
-  }else if(DEF_TER == cache_attr->flag){ //if Terminated
-    sprintf(log, "[%s] run time: %02d sec. #request hit : %02d, miss : %02d\n", "Terminated",
-     now-cache_attr->start, cache_attr->hit, cache_attr->miss);
-    write(fd, log, strlen(log));
+  if(NULL == fp){
+    fputs("in writeLogFile() File pointer error\n", stderr);
+    return -1;
   }
 
+  time(&now);
+  logTime = localtime(&now);
+  memset(hash_dir, 0, sizeof(hash_dir));
+  memset(hash_file, 0, DIR_LEN);
+  memcpy(hash_dir, src_url, HASH_DIR_LEN);
+  memcpy(hash_file, src_url+3, DIR_LEN-3);
+  //if 1 = hit, -1 = Terminated
+  if(DEF_HIT == cache_attr->flag){
+    fprintf(fp, "[%s]%s/%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n", "Hit", hash_dir, hash_file,
+  logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
+    fprintf(fp, "[%s]%s\n", "Hit", input_url);
+  }else if(DEF_MISS == cache_attr->flag){
+    fprintf(fp, "[%s]%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n", "Miss", input_url, logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
+  }else if(DEF_TER == cache_attr->flag){
+    fprintf(fp, "[%s] run time: %dsec. #request hit : %d, miss : %d\n", "Terminated", now-cache_attr->start, cache_attr->hit, cache_attr->miss);
+  }
   return 0;
 }
+
 int main(int argc, char* argv[])
 {
   int fd; //logfile file descrypter
   char *input_url = 0, *hashed_url = 0;
   char temp[DIR_LEN] = "/cache", path[DIR_LEN], logPath[DIR_LEN]="/logfile";  //concaternate for root dir name var
   CACHE_ATTR cache_attr;
+  FILE *log_fp = 0;
 
   input_url = (char*)malloc(sizeof(char)*DIR_LEN);
   hashed_url = (char*)malloc(sizeof(char)*DIR_LEN);
@@ -274,7 +265,7 @@ int main(int argc, char* argv[])
   strcat(root_dir, temp);
   memcpy(path, root_dir, sizeof(root_dir));
 
-  //root driectory logic
+  //make root driectory logic
   umask(0000);
   mkdir(path, S_IRWXU | S_IRWXG | S_IRWXO);
   chdir(path);
@@ -292,15 +283,15 @@ int main(int argc, char* argv[])
   sprintf(temp, "%s/%s", temp, "/logfile.txt"); // path is ~/logfile/logfile.txt
   if(0 > (fd = open(temp, O_RDWR | O_CREAT | O_APPEND, 0777)))
     fputs("in main() open() error!", stderr);
-
+  log_fp = fdopen(fd, "r+");
 
   while(1){
     printf("input URL> ");
     scanf("%s", input_url);
     if(0 == strcmp(input_url, "bye")){
       cache_attr.flag = DEF_TER;
-      writeLog(input_url, hashed_url, &cache_attr, fd);
-      close(fd);
+      writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
+      fclose(log_fp);
       break;
     }
     if(0 == sha1_hash(input_url, hashed_url))
@@ -318,7 +309,7 @@ int main(int argc, char* argv[])
       cache_attr.hit += 1;
       cache_attr.flag = DEF_HIT;
     }
-    writeLog(input_url, hashed_url, &cache_attr, fd);
+    writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
   }
   if(input_url) free(input_url);
   if(hashed_url) free(hashed_url);
