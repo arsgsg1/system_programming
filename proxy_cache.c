@@ -176,14 +176,14 @@ int isHit(char *src_url)
           if(pDirDown){closedir(pDirDown); pDirDown=NULL;}
           if(pDirTop){closedir(pDirTop); pDirTop=NULL;}
 
-          return 1;
+          return DEF_HIT;
         }
       }
     }
   }
   if(pDirDown){closedir(pDirDown); pDirDown=NULL;}
   if(pDirTop){closedir(pDirTop); pDirTop=NULL;}
-  return 0;
+  return DEF_MISS;
 }
 //////////////////////////////////////////////////////////////////
 //  changeDir                                                   //
@@ -297,7 +297,7 @@ int main(int argc, char* argv[])
     if(0 == sha1_hash(input_url, hashed_url))
       fputs("sha1_hash() failed\n", stderr);
 
-    if(0 == isHit(hashed_url)){
+    if(DEF_MISS == isHit(hashed_url)){
       cache_attr.miss += 1;
       cache_attr.flag = DEF_MISS;
       makeDir(hashed_url);
