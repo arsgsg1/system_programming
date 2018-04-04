@@ -17,22 +17,32 @@
 #include <openssl/sha.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <pwd.h>
 
 #define DIR_LEN 256      //buffer size
 #define HASH_DIR_LEN 3   //directory size
-#define DEF_HIT 1
-#define DEF_MISS  0
-#define DEF_TER -1
+#define DEF_HIT 1       //meaning hit
+#define DEF_MISS  0     //meaning miss
+#define DEF_TER_CHILD -1  //meaning child process Terminated
+#define DEF_TER_SERV -2   //meaning parent process Terminated
+#define MAX_PROC 500      //child process list length
 typedef struct _CACHE_ATTR{
   int hit;
   int miss;
   int flag;
   time_t start;
-  struct tm *gtp;
+  int numofchild;
 }CACHE_ATTR;
+/*
+  int hit -> for hit counting variable
+      miss-> for miss counting variable
+      flag-> for logfile control flag (hit, miss, Terminated child, Terminated server)
+      numofchild-> parent process have numofchild process counting variable
+  time_t start -> for loging start time each process
+*/
 
 char root_dir[DIR_LEN]; //present working directory
 ///////////////////////////////////////////////////////
@@ -212,11 +222,23 @@ int changeDir(char *src_url)
   if(0 > chdir(work)){fputs("in changeDir() chdir() error\n", stderr); return -1;}
   return 1;
 }
-/*
-writeLog
-input_url, hashed_url, log에 기록할 정보 구조체, 로그파일을 open한 file descrypter
-return -> int value -> 0 success
-*/
+
+//////////////////////////////////////////////////////////////////////////
+//  writeLogFile                                                        //
+//  ====================================================================//
+//  Input : char *input url -> input url                                //
+//                src_url -> hashed_url                                 //
+//          CACHE_ATTR *cache_attr -> data struct for program loging    //
+//          FILE *log_fp -> log file's FILE struct pointer              //
+//  output : int -> 0 success                                           //
+//               -> -1  failed                                          //
+//  Purpose : program status writng log file                            //
+//  1. hit, miss count                                                  //
+//  2. if hit, hashed_url and input_url                                 //
+//  3. if miss, input url                                               //
+//  4. if Terminated, runtime, hit count, miss count                    //
+//  5. every log has local time loging                                  //
+//////////////////////////////////////////////////////////////////////////
 int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *fp)
 {
   char hash_dir[HASH_DIR_LEN+1], hash_file[DIR_LEN];
@@ -241,12 +263,23 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
     fprintf(fp, "[%s]%s\n", "Hit", input_url);
   }else if(DEF_MISS == cache_attr->flag){
     fprintf(fp, "[%s]%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n", "Miss", input_url, logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
-  }else if(DEF_TER == cache_attr->flag){
+  }else if(DEF_TER_CHILD == cache_attr->flag){
     fprintf(fp, "[%s] run time: %dsec. #request hit : %d, miss : %d\n", "Terminated", now-cache_attr->start, cache_attr->hit, cache_attr->miss);
+  }else if(DEF_TER_SERV == cache_attr->flag){
+    fprintf(fp, "**SERVER** [%s] run time: %d sec. #sub process: %d\n", "Terminated", now-cache_attr->start, cache_attr->numofchild);
   }
   return 0;
 }
-
+void rmChildList(pid_t *child_list, pid_t rm_pid, int user_count)
+{
+  int i;
+  for(i = 0; i<user_count; i++){
+    if(rm_pid == child_list[i]){
+      memcpy(child_list+i, child_list+user_count, sizeof(pid_t));
+      return;
+    }
+  }
+}
 int main(int argc, char* argv[])
 {
   int fd; //logfile file descrypter
@@ -254,6 +287,9 @@ int main(int argc, char* argv[])
   char temp[DIR_LEN] = "/cache", path[DIR_LEN], logPath[DIR_LEN]="/logfile";  //concaternate for root dir name var
   CACHE_ATTR cache_attr;
   FILE *log_fp = 0;
+  pid_t parent_pid, child_pid;
+  pid_t child_list[MAX_PROC];
+  int statloc, user_count = 0;
 
   input_url = (char*)malloc(sizeof(char)*DIR_LEN);
   hashed_url = (char*)malloc(sizeof(char)*DIR_LEN);
@@ -273,7 +309,6 @@ int main(int argc, char* argv[])
   //logfile logic(make logfile directory, time info init)
   memset(&cache_attr, 0, sizeof(cache_attr));
   time(&cache_attr.start); //initialized program start time
-  cache_attr.gtp = gmtime(&cache_attr.start);
   getHomeDir(temp);
   umask(0000);
   sprintf(temp, "%s/%s", temp, "logfile");
@@ -285,31 +320,76 @@ int main(int argc, char* argv[])
     fputs("in main() open() error!", stderr);
   log_fp = fdopen(fd, "r+");
 
+  //get process id logic
+  parent_pid = getpid();
+
   while(1){
-    printf("input URL> ");
-    scanf("%s", input_url);
-    if(0 == strcmp(input_url, "bye")){
-      cache_attr.flag = DEF_TER;
+    printf("[%d]input CMD> ", parent_pid);
+    scanf("%s", temp);
+    if(0 == strcmp(temp, "connect")){
+      //fork logic
+      if(0 > (child_pid = fork())){ //if fork error
+        fputs("in main() fork() error", stderr);
+        break;
+      }else if(0 == child_pid){  //if child proc
+        //start child process logic
+        time(&cache_attr.start);  //child process init to start time
+
+        while(1){
+          printf("[%d]input URL> ", getpid());
+          scanf("%s", input_url);
+          if(0 == strcmp(input_url, "bye")){
+            cache_attr.flag = DEF_TER_CHILD;
+            writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
+            fclose(log_fp); //file stream copy from parent process, each process is opening stream.
+            //so, program shoud close stream
+            break;
+          }
+          if(0 == sha1_hash(input_url, hashed_url))
+            fputs("sha1_hash() failed\n", stderr);
+
+          if(DEF_MISS == isHit(hashed_url)){
+            cache_attr.miss += 1;
+            cache_attr.flag = DEF_MISS;
+            makeDir(hashed_url);
+
+            if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
+            createFile(hashed_url);
+            chdir(path);  //cd ~/cache/
+          }else{
+            cache_attr.hit += 1;
+            cache_attr.flag = DEF_HIT;
+          }
+          writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
+        }
+        //child heap free
+        if(input_url) free(input_url);
+        if(hashed_url) free(hashed_url);
+        return 1; //if child success work, return 1
+      }else{  //if parent proc
+        child_list[user_count] = child_pid;
+        user_count++;
+        cache_attr.numofchild += 1;
+
+        //if you want many process handling, using for loop or other method
+        // if you want blocking, using wait() function
+        child_list[user_count] = wait(&statloc);
+
+        //if you want non-blocking, using waitpid() function (WNOHANG)
+        //if(0 > (child_pid = waitpid(child_list[user_count-1], &statloc, WNOHANG))){fputs("in main() waitpid() error\n", stderr);}
+
+        rmChildList(child_list, child_pid, user_count);
+        user_count--;
+        //if abnormal child process work, check logic
+        //if(1 != statloc){...}
+      }
+    }else if(0 == strcmp(temp, "quit")){
+      cache_attr.flag = DEF_TER_SERV;
       writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
       fclose(log_fp);
       break;
     }
-    if(0 == sha1_hash(input_url, hashed_url))
-      fputs("sha1_hash() failed\n", stderr);
 
-    if(DEF_MISS == isHit(hashed_url)){
-      cache_attr.miss += 1;
-      cache_attr.flag = DEF_MISS;
-      makeDir(hashed_url);
-
-      if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
-      createFile(hashed_url);
-      chdir(path);  //cd ~/cache/
-    }else{
-      cache_attr.hit += 1;
-      cache_attr.flag = DEF_HIT;
-    }
-    writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
   }
   if(input_url) free(input_url);
   if(hashed_url) free(hashed_url);
