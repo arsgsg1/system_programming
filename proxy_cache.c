@@ -97,22 +97,17 @@ int makeDir(char *src_url)
   char create_dir[DIR_LEN];  //creating new directory name var
   char path[DIR_LEN];
   int i;
+  DIR *pDir = NULL;
 
   memcpy(path, root_dir, sizeof(path));
+  memcpy(create_dir, src_url, HASH_DIR_LEN);
+  create_dir[HASH_DIR_LEN] = '\0';
 
-  if(path){ //pwd is home directory /home/yuncreate_dir[3] = '\0';
-
-    //create new directory name 3 character
-    memcpy(create_dir, src_url, HASH_DIR_LEN);
-    create_dir[HASH_DIR_LEN] = '\0';
-
+  if(NULL == (pDir = opendir(create_dir))){
     //permission setting for 777
     umask(0000);
-    if(0 > mkdir(create_dir, S_IRWXU | S_IRWXG | S_IRWXO)){
-      fputs("in makeDir(), mkdir() error!", stderr);
-    }
-  }
-
+    if(0 > mkdir(create_dir, S_IRWXU | S_IRWXG | S_IRWXO)){fputs("in makeDir(), mkdir() error!", stderr);}
+  }else{closedir(pDir); pDir = NULL;}
   return 1;
 }
 
