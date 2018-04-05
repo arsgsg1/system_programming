@@ -212,11 +212,22 @@ int changeDir(char *src_url)
   if(0 > chdir(work)){fputs("in changeDir() chdir() error\n", stderr); return -1;}
   return 1;
 }
-/*
-writeLog
-input_url, hashed_url, log에 기록할 정보 구조체, 로그파일을 open한 file descrypter
-return -> int value -> 0 success
-*/
+//////////////////////////////////////////////////////////////////////////
+//  writeLogFile                                                        //
+//  ====================================================================//
+//  Input : char *input url -> input url                                //
+//                src_url -> hashed_url                                 //
+//          CACHE_ATTR *cache_attr -> data struct for program loging    //
+//          FILE *log_fp -> log file's FILE struct pointer              //
+//  output : int -> 0 success                                           //
+//               -> -1  failed                                          //
+//  Purpose : program status writng log file                            //
+//  1. hit, miss count                                                  //
+//  2. if hit, hashed_url and input_url                                 //
+//  3. if miss, input url                                               //
+//  4. if Terminated, runtime, hit count, miss count                    //
+//  5. every log has local time loging                                  //
+//////////////////////////////////////////////////////////////////////////
 int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *fp)
 {
   char hash_dir[HASH_DIR_LEN+1], hash_file[DIR_LEN];
