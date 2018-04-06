@@ -107,22 +107,17 @@ int makeDir(char *src_url)
   char create_dir[DIR_LEN];  //creating new directory name var
   char path[DIR_LEN];
   int i;
+  DIR *pDir = NULL;
 
   memcpy(path, root_dir, sizeof(path));
+  memcpy(create_dir, src_url, HASH_DIR_LEN);
+  create_dir[HASH_DIR_LEN] = '\0';
 
-  if(path){ //pwd is home directory /home/yuncreate_dir[3] = '\0';
-
-    //create new directory name 3 character
-    memcpy(create_dir, src_url, HASH_DIR_LEN);
-    create_dir[HASH_DIR_LEN] = '\0';
-
+  if(NULL == (pDir = opendir(create_dir))){
     //permission setting for 777
     umask(0000);
-    if(0 > mkdir(create_dir, S_IRWXU | S_IRWXG | S_IRWXO)){
-      fputs("in makeDir(), mkdir() error!", stderr);
-    }
-  }
-
+    if(0 > mkdir(create_dir, S_IRWXU | S_IRWXG | S_IRWXO)){fputs("in makeDir(), mkdir() error!", stderr);}
+  }else{closedir(pDir); pDir = NULL;}
   return 1;
 }
 
@@ -290,6 +285,7 @@ int main(int argc, char* argv[])
   pid_t parent_pid, child_pid;
   pid_t child_list[MAX_PROC];
   int statloc, user_count = 0;
+  DIR *pDir = NULL;
 
   input_url = (char*)malloc(sizeof(char)*DIR_LEN);
   hashed_url = (char*)malloc(sizeof(char)*DIR_LEN);
@@ -302,17 +298,21 @@ int main(int argc, char* argv[])
   memcpy(path, root_dir, sizeof(root_dir));
 
   //make root driectory logic
-  umask(0000);
-  mkdir(path, S_IRWXU | S_IRWXG | S_IRWXO);
+  if(NULL == (pDir = opendir(path))){
+    umask(0000);
+    mkdir(path, S_IRWXU | S_IRWXG | S_IRWXO);
+  }else{ closedir(pDir); pDir = NULL;}
   chdir(path);
 
   //logfile logic(make logfile directory, time info init)
   memset(&cache_attr, 0, sizeof(cache_attr));
   time(&cache_attr.start); //initialized program start time
   getHomeDir(temp);
-  umask(0000);
   sprintf(temp, "%s/%s", temp, "logfile");
-  mkdir(temp, S_IRWXU | S_IRWXG | S_IRWXO);
+  if(NULL == (pDir = opendir(temp))){
+    umask(0000);
+    mkdir(temp, S_IRWXU | S_IRWXG | S_IRWXO);
+  }else{ closedir(pDir); pDir = NULL; }
 
   //create logfile(~/logfile/logfile.txt)
   sprintf(temp, "%s/%s", temp, "/logfile.txt"); // path is ~/logfile/logfile.txt
