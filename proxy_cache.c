@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////
 //  File name : proxy_cache.c                                    //
-//  Date  : 2018/03/25                                           //
+//  Date  : 2018/04/10                                           //
 //  Os    : Ubuntu 16.04 LTS 64bits                              //
 //  Author  : Yun Joa Houng                                      //
 //  Student ID  : 2015722052                                     //
@@ -265,6 +265,15 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
   }
   return 0;
 }
+///////////////////////////////////////////////////////////////////////////////////
+//  rmChildList                                                                  //
+//  =============================================================================//
+//  pid_t *child_list -> for parent process has each child process child_list    //
+//  pid_t rm_pid  ->  remove child process from child_list                       //
+//  int user_count  ->  child process(numofclient)                               //
+//  Purpose:                                                                     //
+//  for parent process easy control child process                                //
+///////////////////////////////////////////////////////////////////////////////////
 void rmChildList(pid_t *child_list, pid_t rm_pid, int user_count)
 {
   int i;
