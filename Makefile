@@ -1,12 +1,15 @@
 CC = gcc
-OBJS = proxy_cache.o
+OBJ1 = server.o
+OBJ2 = client.o
 CFLAGS = -lcrypto -g
-TARGET = proxy_cache
+TARGET = Server Client
 .SUFFIXES : .c .o
+all : Server Client
+Server : $(OBJ1)
+	$(CC) -o Server $(OBJ1) $(CFLAGS)
 
-all : $(TARGET)
-$(TARGET) : $(OBJS)
-	$(CC) -o $@ $(OBJS) $(CFLAGS)
+Client : $(OBJ2)
+	$(CC) -o Client $(OBJ2) $(CFLAGS)
 
 clean :
 	rm *.o $(TARGET)
