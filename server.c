@@ -270,6 +270,7 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
   }else if(DEF_TER_SERV == cache_attr->flag){
     fprintf(fp, "**SERVER** [%s] run time: %ld sec. #sub process: %d\n", "Terminated", now-cache_attr->start, cache_attr->numofchild);
   }
+  fflush(fp);
   return 0;
 }
 ///////////////////////////////////////////////////////////////////////////////////
@@ -303,17 +304,18 @@ void writeMsg(int sock_fd, char *msg, int len, CACHE_ATTR *cache_attr)
 int main(int argc, char* argv[])
 {
   int fd; //logfile file descrypter
+  int opt = 1;
   char *input_url = 0, *hashed_url = 0;
   char temp[DIR_LEN] = "/cache", path[DIR_LEN], logPath[DIR_LEN]="/logfile";  //concaternate for root dir name var
   CACHE_ATTR cache_attr;
   FILE *log_fp = 0;
   pid_t parent_pid, child_pid;
   pid_t child_list[MAX_PROC];
-  int statloc, user_count = 0;
+  int statloc, user_count = 0, clnt_port = 0;
   DIR *pDir = NULL;
 
   //socket variable
-  int clnt_fd, serv_fd, addr_len, msg_len, len_read;
+  int clnt_fd, serv_fd, addr_len = 0, msg_len, len_read;
   struct sockaddr_in serv_addr, clnt_addr;
   char clnt_ip[BUF_SIZE], msg[BUF_SIZE];
 
@@ -358,6 +360,7 @@ int main(int argc, char* argv[])
     fputs("in main() can't open stream socket", stderr);
     return -1;
   }
+  setsockopt(serv_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
   //initialize socket information
   memset(&serv_addr, 0, sizeof(serv_addr));
   serv_addr.sin_family = AF_INET;
@@ -379,7 +382,8 @@ int main(int argc, char* argv[])
 
   while(1){
     memset(&clnt_addr, 0, sizeof(clnt_addr));
-    if(0 > (clnt_fd = accept(serv_fd, (struct sockaddr*)&clnt_addr, &addr_len))){fputs("can't accept.\n", stderr); }
+    addr_len = sizeof(clnt_addr);
+    clnt_fd = accept(serv_fd, (struct sockaddr*)&clnt_addr, &addr_len);
     if(0 > (child_pid = fork())){
       fputs("can't make process.\n", stderr);
       close(clnt_fd);
@@ -390,7 +394,7 @@ int main(int argc, char* argv[])
       strncpy(clnt_ip, inet_ntoa(clnt_addr.sin_addr), sizeof(clnt_ip));
       printf("[%s : %d] client was connected\n", clnt_ip, ntohs(clnt_addr.sin_port));
 
-      while(0 < (len_read = read(clnt_fd, input_url, sizeof(char) * DIR_LEN))){
+      while(0 < read(clnt_fd, input_url, sizeof(char) * DIR_LEN)){
         //read함수는 한번에 전달받는 것을 보장해주지 않는다. 따라서 반복문을 여러 번 돌 수 있음
 
         if(0 == strcmp(input_url, "bye")){

@@ -1,2 +1,4 @@
 *.o
 proxy_cache
+Client
+Server
