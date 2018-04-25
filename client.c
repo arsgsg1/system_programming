@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = inet_addr(haddr);
   //server_addr.sin_port = htons(PORTNO);
-  server_addr.sin_port = htons(atoi(argv[1]));
+  server_addr.sin_port = htons(PORTNO);
   if(0 > connect(sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr))){
     fputs("can't connect.\n", stderr);
     return -1;

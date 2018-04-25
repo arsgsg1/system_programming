@@ -365,8 +365,8 @@ int main(int argc, char* argv[])
   memset(&serv_addr, 0, sizeof(serv_addr));
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  //serv_addr.sin_port = htons(PORT_NUM);
-  serv_addr.sin_port = htons(atoi(argv[1]));
+  serv_addr.sin_port = htons(PORT_NUM);
+  //serv_addr.sin_port = htons(atoi(argv[1]));
 
   if(0 > bind(serv_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))){
     fputs("in main() can't bind socket.\n", stderr);
