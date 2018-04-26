@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////
 //  File name : proxy_cache.c                                    //
-//  Date  : 2018/04/10                                           //
+//  Date  : 2018/04/26                                           //
 //  Os    : Ubuntu 16.04 LTS 64bits                              //
 //  Author  : Yun Joa Houng                                      //
 //  Student ID  : 2015722052                                     //
@@ -290,6 +290,16 @@ static void child_handler()
 
   }
 }
+///////////////////////////////////////////////////////////////////////////////////
+//  writeMsg                                                                     //
+//  =============================================================================//
+//  int sock_fd -> transmission socket file descrypter                           //
+//  char *msg -> message                                                         //
+//  int len -> message length                                                    //
+//  CACHE_ATTR *cache_attr -> message copy for transmission                      //
+//  Prupose:                                                                     //
+//  for write message to socket(client)                                          //
+///////////////////////////////////////////////////////////////////////////////////
 void writeMsg(int sock_fd, char *msg, int len, CACHE_ATTR *cache_attr)
 {
   if(DEF_HIT == cache_attr->flag){
@@ -366,7 +376,6 @@ int main(int argc, char* argv[])
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
   serv_addr.sin_port = htons(PORT_NUM);
-  //serv_addr.sin_port = htons(atoi(argv[1]));
 
   if(0 > bind(serv_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))){
     fputs("in main() can't bind socket.\n", stderr);
@@ -395,7 +404,6 @@ int main(int argc, char* argv[])
       printf("[%s : %d] client was connected\n", clnt_ip, ntohs(clnt_addr.sin_port));
 
       while(0 < read(clnt_fd, input_url, sizeof(char) * DIR_LEN)){
-        //read함수는 한번에 전달받는 것을 보장해주지 않는다. 따라서 반복문을 여러 번 돌 수 있음
 
         if(0 == strcmp(input_url, "bye")){
           printf("[%s : %d] client was disconnected\n", clnt_ip, ntohs(clnt_addr.sin_port));
