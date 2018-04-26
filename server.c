@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////
 //  File name : proxy_cache.c                                    //
-//  Date  : 2018/04/10                                           //
+//  Date  : 2018/04/26                                           //
 //  Os    : Ubuntu 16.04 LTS 64bits                              //
 //  Author  : Yun Joa Houng                                      //
 //  Student ID  : 2015722052                                     //
@@ -9,26 +9,33 @@
 //  Descryption : user input url, programe is hashing input url  //
 //                and create directory, file from hashed url     //
 ///////////////////////////////////////////////////////////////////
+#include <arpa/inet.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <netinet/in.h>
 #include <openssl/sha.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/socket.h>
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 #include <pwd.h>
 
-#define DIR_LEN 256      //buffer size
-#define HASH_DIR_LEN 3   //directory size
-#define DEF_HIT 1       //meaning hit
-#define DEF_MISS  0     //meaning miss
-#define DEF_TER_CHILD -1  //meaning child process Terminated
-#define DEF_TER_SERV -2   //meaning parent process Terminated
-#define MAX_PROC 500      //child process list length
+#define DIR_LEN        256 //driectory name length
+#define HASH_DIR_LEN   3   //directory size
+#define DEF_HIT        1   //meaning hit
+#define DEF_MISS       0   //meaning miss
+#define DEF_TER_CHILD -1   //meaning child process Terminated
+#define DEF_TER_SERV  -2   //meaning parent process Terminated
+#define MAX_PROC       500 //child process list length
+#define BUF_SIZE       256//server sending message buffer size
+#define PORT_NUM       40000//server communication port with client
+#define BACKLOG        10  //listening queue size
 typedef struct _CACHE_ATTR{
   int hit;
   int miss;
@@ -253,16 +260,17 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
   memcpy(hash_file, src_url+3, DIR_LEN-3);
   //if 1 = hit, -1 = Terminated
   if(DEF_HIT == cache_attr->flag){
-    fprintf(fp, "[%s]%s/%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n", "Hit", hash_dir, hash_file,
+    fprintf(fp, "[%s] ServerPID : %d | %s/%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Hit", getpid(), hash_dir, hash_file,
   logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
     fprintf(fp, "[%s]%s\n", "Hit", input_url);
   }else if(DEF_MISS == cache_attr->flag){
-    fprintf(fp, "[%s]%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n", "Miss", input_url, logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
+    fprintf(fp, "[%s] ServerPID : %d | %s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Miss", getpid(), input_url, logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
   }else if(DEF_TER_CHILD == cache_attr->flag){
-    fprintf(fp, "[%s] run time: %ldsec. #request hit : %d, miss : %d\n", "Terminated", now-cache_attr->start, cache_attr->hit, cache_attr->miss);
+    fprintf(fp, "[%s] ServerPID : %d | run time: %ldsec. #request hit : %d, miss : %d\n","Terminated", getpid(), now-cache_attr->start, cache_attr->hit, cache_attr->miss);
   }else if(DEF_TER_SERV == cache_attr->flag){
     fprintf(fp, "**SERVER** [%s] run time: %ld sec. #sub process: %d\n", "Terminated", now-cache_attr->start, cache_attr->numofchild);
   }
+  fflush(fp);
   return 0;
 }
 ///////////////////////////////////////////////////////////////////////////////////
@@ -274,27 +282,52 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
 //  Purpose:                                                                     //
 //  for parent process easy control child process                                //
 ///////////////////////////////////////////////////////////////////////////////////
-void rmChildList(pid_t *child_list, pid_t rm_pid, int user_count)
+static void child_handler()
 {
-  int i;
-  for(i = 0; i<user_count; i++){
-    if(rm_pid == child_list[i]){
-      memcpy(child_list+i, child_list+user_count, sizeof(pid_t));
-      return;
-    }
+  pid_t child_pid;
+  int status;
+  while(0 < (child_pid = waitpid(-1, &status, WNOHANG))){
+
   }
 }
+///////////////////////////////////////////////////////////////////////////////////
+//  writeMsg                                                                     //
+//  =============================================================================//
+//  int sock_fd -> transmission socket file descrypter                           //
+//  char *msg -> message                                                         //
+//  int len -> message length                                                    //
+//  CACHE_ATTR *cache_attr -> message copy for transmission                      //
+//  Prupose:                                                                     //
+//  for write message to socket(client)                                          //
+///////////////////////////////////////////////////////////////////////////////////
+void writeMsg(int sock_fd, char *msg, int len, CACHE_ATTR *cache_attr)
+{
+  if(DEF_HIT == cache_attr->flag){
+    strcpy(msg, "HIT");
+  }else if(DEF_MISS == cache_attr->flag){
+    strcpy(msg, "MISS");
+  }
+  write(sock_fd, msg, len);
+  return;
+}
+
 int main(int argc, char* argv[])
 {
   int fd; //logfile file descrypter
+  int opt = 1;
   char *input_url = 0, *hashed_url = 0;
   char temp[DIR_LEN] = "/cache", path[DIR_LEN], logPath[DIR_LEN]="/logfile";  //concaternate for root dir name var
   CACHE_ATTR cache_attr;
   FILE *log_fp = 0;
   pid_t parent_pid, child_pid;
   pid_t child_list[MAX_PROC];
-  int statloc, user_count = 0;
+  int statloc, user_count = 0, clnt_port = 0;
   DIR *pDir = NULL;
+
+  //socket variable
+  int clnt_fd, serv_fd, addr_len = 0, msg_len, len_read;
+  struct sockaddr_in serv_addr, clnt_addr;
+  char clnt_ip[BUF_SIZE], msg[BUF_SIZE];
 
   input_url = (char*)malloc(sizeof(char)*DIR_LEN);
   hashed_url = (char*)malloc(sizeof(char)*DIR_LEN);
@@ -332,71 +365,81 @@ int main(int argc, char* argv[])
   //get process id logic
   parent_pid = getpid();
 
+  //socket setting logic
+  if(0 > (serv_fd = socket(PF_INET, SOCK_STREAM, 0))){
+    fputs("in main() can't open stream socket", stderr);
+    return -1;
+  }
+  setsockopt(serv_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+  //initialize socket information
+  memset(&serv_addr, 0, sizeof(serv_addr));
+  serv_addr.sin_family = AF_INET;
+  serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  serv_addr.sin_port = htons(PORT_NUM);
+
+  if(0 > bind(serv_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))){
+    fputs("in main() can't bind socket.\n", stderr);
+    return -1;
+  }
+  if(0 > listen(serv_fd, BACKLOG)){
+    fputs("in main() can't listening socket.\n", stderr);
+    return -1;
+  }
+
+  //initialize signal handler
+  signal(SIGCHLD, (void *)child_handler);
+
   while(1){
-    printf("[%d]input CMD> ", parent_pid);
-    scanf("%s", temp);
-    if(0 == strcmp(temp, "connect")){
-      //fork logic
-      if(0 > (child_pid = fork())){ //if fork error
-        fputs("in main() fork() error", stderr);
-        break;
-      }else if(0 == child_pid){  //if child proc
-        //start child process logic
-        time(&cache_attr.start);  //child process init to start time
-
-        while(1){
-          printf("[%d]input URL> ", getpid());
-          scanf("%s", input_url);
-          if(0 == strcmp(input_url, "bye")){
-            cache_attr.flag = DEF_TER_CHILD;
-            writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
-            fclose(log_fp); //file stream copy from parent process, each process is opening stream.
-            //so, program shoud close stream
-            break;
-          }
-          if(0 == sha1_hash(input_url, hashed_url))
-            fputs("sha1_hash() failed\n", stderr);
-
-          if(DEF_MISS == isHit(hashed_url)){
-            cache_attr.miss += 1;
-            cache_attr.flag = DEF_MISS;
-            makeDir(hashed_url);
-
-            if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
-            createFile(hashed_url);
-            chdir(path);  //cd ~/cache/
-          }else{
-            cache_attr.hit += 1;
-            cache_attr.flag = DEF_HIT;
-          }
-          writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
-        }
-        //child heap free
-        if(input_url) free(input_url);
-        if(hashed_url) free(hashed_url);
-        return 1; //if child success work, return 1
-      }else{  //if parent proc
-        child_list[user_count] = child_pid;
-        user_count++;
-        cache_attr.numofchild += 1;
-
-        //if you want many process handling, using for loop or other method
-        // if you want blocking, using wait() function
-        child_list[user_count] = wait(&statloc);
-
-        //if you want non-blocking, using waitpid() function (WNOHANG)
-        //if(0 > (child_pid = waitpid(child_list[user_count-1], &statloc, WNOHANG))){fputs("in main() waitpid() error\n", stderr);}
-
-        rmChildList(child_list, child_pid, user_count);
-        user_count--;
-        //if abnormal child process work, check logic
-        //if(1 != statloc){...}
-      }
-    }else if(0 == strcmp(temp, "quit")){
-      cache_attr.flag = DEF_TER_SERV;
-      writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
-      fclose(log_fp);
+    memset(&clnt_addr, 0, sizeof(clnt_addr));
+    addr_len = sizeof(clnt_addr);
+    clnt_fd = accept(serv_fd, (struct sockaddr*)&clnt_addr, &addr_len);
+    if(0 > (child_pid = fork())){
+      fputs("can't make process.\n", stderr);
+      close(clnt_fd);
+      close(serv_fd);
       break;
+    }else if(0 == child_pid){ //child logic
+      time(&cache_attr.start);
+      strncpy(clnt_ip, inet_ntoa(clnt_addr.sin_addr), sizeof(clnt_ip));
+      printf("[%s : %d] client was connected\n", clnt_ip, ntohs(clnt_addr.sin_port));
+
+      while(0 < read(clnt_fd, input_url, sizeof(char) * DIR_LEN)){
+
+        if(0 == strcmp(input_url, "bye")){
+          printf("[%s : %d] client was disconnected\n", clnt_ip, ntohs(clnt_addr.sin_port));
+          cache_attr.flag = DEF_TER_CHILD;
+
+          writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
+
+          fclose(log_fp);
+          close(clnt_fd);
+          if(input_url) free(input_url);
+          if(hashed_url) free(hashed_url);
+          exit(1);
+        }
+        //hit miss logic
+        if(0 == sha1_hash(input_url, hashed_url))
+          fputs("sha1_hash() failed\n", stderr);
+
+        if(DEF_MISS == isHit(hashed_url)){
+          cache_attr.miss += 1;
+          cache_attr.flag = DEF_MISS;
+          makeDir(hashed_url);
+
+          if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
+          createFile(hashed_url);
+          chdir(path);  //cd ~/cache/
+        }else{
+          cache_attr.hit += 1;
+          cache_attr.flag = DEF_HIT;
+        }
+        writeMsg(clnt_fd, msg, BUF_SIZE, &cache_attr);
+        writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
+      }
+    }else{  //parent logic
+      //control child process list
+      //write log
+      //closing file descrypter
     }
 
   }
