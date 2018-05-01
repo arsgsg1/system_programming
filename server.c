@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #include <openssl/sha.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -25,6 +26,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <pwd.h>
+extern int h_errno;
 
 #define DIR_LEN        256 //driectory name length
 #define HASH_DIR_LEN   3   //directory size
@@ -34,7 +36,8 @@
 #define DEF_TER_SERV  -2   //meaning parent process Terminated
 #define MAX_PROC       500 //child process list length
 #define BUF_SIZE       1024//server sending message buffer size
-#define PORT_NUM       40000//server communication port with client
+#define PORTNO         40000//server communication port with client
+#define HTTP_PORTNO    80
 #define BACKLOG        10  //listening queue size
 typedef struct _CACHE_ATTR{
   int hit;
@@ -135,14 +138,14 @@ int makeDir(char *src_url)  //add parameter header
 //  Output: int ->  -1 fail                             //
 //  Purpose:  making file from hashed url               //
 //////////////////////////////////////////////////////////
-int createFile(char *src_url) //header
+int createFile(char *src_url, char *data) //header
 {
   char buf[DIR_LEN];  //file name
   int fd;
 
   memcpy(buf, src_url+HASH_DIR_LEN, (sizeof(char)*DIR_LEN)-HASH_DIR_LEN);
   //write mode | when no exist file, create file | when file exist, stop func
-  if(0 > (fd = open(buf, O_RDWR | O_CREAT))){
+  if(0 > (fd = open(buf, O_RDWR | O_CREAT, 0777))){
     //when you know error to spacify cause, using 'errno'
     fputs("in createFile(), open() error", stderr);
     return -1;
@@ -150,6 +153,7 @@ int createFile(char *src_url) //header
 
   //Write File logic, when you want write file, using 'write' func
   //write();
+  write(fd, data, BUF_SIZE);
 
   close(fd);
   return 1;
@@ -286,35 +290,16 @@ static void child_handler()
 
   }
 }
-////////////////////////////////////////////////////////////////////////////////////
-//  cacheResMsg                                                                   //
-//  ==============================================================================//
-//  int sock_fd -> transmission socket file descrypter                            //
-//  char *msg -> message                                                          //
-//                                                                                //
-//  CACHE_ATTR *cache_attr -> message copy for transmission                       //
-//  Prupose:                                                                      //
-//  for cache hit, miss judgement and transmission socket http protocol msg format//
-////////////////////////////////////////////////////////////////////////////////////
-void cacheResMsg(int sock_fd, char *msg, CACHE_ATTR *cache_attr)
-{ //header
-  char response_header[BUF_SIZE] = {0,};
-  char response_message[BUF_SIZE] = {0, };
-  memset(msg, 0, sizeof(char) * BUF_SIZE);
-  if(DEF_HIT == cache_attr->flag){
-    strcpy(msg, "HIT");
-  }else if(DEF_MISS == cache_attr->flag){
-    strcpy(msg, "MISS");
+void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed_url)
+{
+  char response_buf[BUF_SIZE] = {0, };
+  write(web_sock_fd, request_msg, BUF_SIZE);
+  while(0 < read(web_sock_fd, response_buf, BUF_SIZE)){
+    createFile(hashed_url, response_buf);
+    write(clnt_fd, response_buf, BUF_SIZE);
   }
-  sprintf(response_message, "<h1>%s</h1><br>", msg);
-  sprintf(response_header, "HTTP/1.1 200 OK\r\n"
-  "Server: 2018 simple web server\r\n"
-  "Content-length:%lu\r\n"
-  "Content-type:text/html\r\n\r\n", strlen(response_message));
-  write(sock_fd, response_header, strlen(response_header));
-  write(sock_fd, response_message, strlen(response_message));
-  return;
 }
+
 char *requestParsedURL(char *request, char *urlBuf)
 {
   char tmp[BUF_SIZE] = {0,};
@@ -330,6 +315,16 @@ char *requestParsedURL(char *request, char *urlBuf)
     strcpy(urlBuf, tok);
   }
   return urlBuf;
+}
+char *getIPAddr(char *addr)
+{
+  struct hostent* hent;
+  char *haddr;
+  int len = strlen(addr);
+  if(NULL != (hent = (struct hostent*)gethostbyname(addr))){
+    haddr = inet_ntoa(*((struct in_addr*)hent->h_addr_list[0]));
+  }
+  return haddr;
 }
 
 int main(int argc, char* argv[])
@@ -396,7 +391,7 @@ int main(int argc, char* argv[])
   memset(&serv_addr, 0, sizeof(serv_addr));
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  serv_addr.sin_port = htons(PORT_NUM);
+  serv_addr.sin_port = htons(PORTNO);
 
   if(0 > bind(serv_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr))){
     fputs("in main() can't bind socket.\n", stderr);
@@ -418,6 +413,7 @@ int main(int argc, char* argv[])
       fputs("can't make process.\n", stderr);
       close(clnt_fd);
       close(serv_fd);
+      fclose(log_fp);
       break;
     }else if(0 == child_pid){ //child logic
       time(&cache_attr.start);
@@ -427,24 +423,48 @@ int main(int argc, char* argv[])
       while(0 < read(clnt_fd, msg, sizeof(char) * DIR_LEN)){
 
         //Parsed URL logic
-        requestParsedURL(msg, input_url);
+        requestParsedURL(msg, input_url); //extract host url from request msg
+
         //hit miss logic
         if(0 == sha1_hash(input_url, hashed_url))
           fputs("sha1_hash() failed\n", stderr);
 
         if(DEF_MISS == isHit(hashed_url)){
+          //if cache miss, proxy request to web server
+          //so, Make socket, request http format message
+          char *ip_addr = getIPAddr(input_url);
+          int web_sock_fd;
+          struct sockaddr_in web_serv_addr;
+          if(0 > (web_sock_fd = socket(PF_INET, SOCK_STREAM, 0))){
+            printf("can't create socket.\n");
+            return -1;
+          }
+
+          memset(&web_serv_addr, 0, sizeof(web_serv_addr));
+          web_serv_addr.sin_family = AF_INET;
+          web_serv_addr.sin_addr.s_addr = inet_addr(ip_addr);
+          web_serv_addr.sin_port = htons(HTTP_PORTNO);
+          if(0 > connect(web_sock_fd, (struct sockaddr*)&web_serv_addr, sizeof(web_serv_addr))){
+            printf("can't connect.\n");
+            return -1;
+          }
+          //write request message http format
+
+          //read data from web server
+
           cache_attr.miss += 1;
           cache_attr.flag = DEF_MISS;
           makeDir(hashed_url);
 
           if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
-          createFile(hashed_url);
+          reqWebResClnt(web_sock_fd, clnt_fd, msg, hashed_url);
           chdir(path);  //cd ~/cache/
+          close(web_sock_fd);
         }else{
           cache_attr.hit += 1;
           cache_attr.flag = DEF_HIT;
+          //hit response
         }
-        cacheResMsg(clnt_fd, msg, &cache_attr);
         writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
       }
       close(clnt_fd);
