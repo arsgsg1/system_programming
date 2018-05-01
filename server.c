@@ -1,11 +1,11 @@
 ///////////////////////////////////////////////////////////////////
 //  File name : proxy_cache.c                                    //
-//  Date  : 2018/04/26                                           //
+//  Date  : 2018/05/01                                           //
 //  Os    : Ubuntu 16.04 LTS 64bits                              //
 //  Author  : Yun Joa Houng                                      //
 //  Student ID  : 2015722052                                     //
 //  ---------------------------------                            //
-//  Title : System Programming Assignment #1-1 (proxy server)    //
+//  Title : System Programming Assignment #2-2 (proxy server)    //
 //  Descryption : user input url, programe is hashing input url  //
 //                and create directory, file from hashed url     //
 ///////////////////////////////////////////////////////////////////
@@ -33,7 +33,7 @@
 #define DEF_TER_CHILD -1   //meaning child process Terminated
 #define DEF_TER_SERV  -2   //meaning parent process Terminated
 #define MAX_PROC       500 //child process list length
-#define BUF_SIZE       256//server sending message buffer size
+#define BUF_SIZE       1024//server sending message buffer size
 #define PORT_NUM       40000//server communication port with client
 #define BACKLOG        10  //listening queue size
 typedef struct _CACHE_ATTR{
@@ -61,7 +61,7 @@ char root_dir[DIR_LEN]; //present working directory
 //          NULL  ->  error                          //
 //  Purpos: string hash function                     //
 ///////////////////////////////////////////////////////
-char *sha1_hash(char *input_url, char *hashed_url)
+char *sha1_hash(char *input_url, char *hashed_url)  //header
 {
   if((!input_url) || (!hashed_url)) //parameter check
     return 0;
@@ -93,7 +93,7 @@ char *sha1_hash(char *input_url, char *hashed_url)
 // Output: char * -> home directory                    //
 // Purpose: getting home directory                     //
 /////////////////////////////////////////////////////////
-char *getHomeDir(char *home){
+char *getHomeDir(char *home){ //header
   struct passwd *usr_info = getpwuid(getuid());
   strcpy(home, usr_info->pw_dir);
 
@@ -107,7 +107,7 @@ char *getHomeDir(char *home){
 //  Output: int ->  -1  fail                        //
 //              ->  1   success                     //
 //////////////////////////////////////////////////////
-int makeDir(char *src_url)
+int makeDir(char *src_url)  //add parameter header
 {
   if(!src_url) return -1;
 
@@ -135,7 +135,7 @@ int makeDir(char *src_url)
 //  Output: int ->  -1 fail                             //
 //  Purpose:  making file from hashed url               //
 //////////////////////////////////////////////////////////
-int createFile(char *src_url)
+int createFile(char *src_url) //header
 {
   char buf[DIR_LEN];  //file name
   int fd;
@@ -164,10 +164,10 @@ int createFile(char *src_url)
 //                  0   no exist                  //
 //  Purpose:  read directory, search file to exist//
 ////////////////////////////////////////////////////
-int isHit(char *src_url)
+int isHit(char *src_url)  //add parameter header
 {
-  char path[DIR_LEN];
-  char buf_dir[DIR_LEN];
+  char path[DIR_LEN] = {0, };
+  char buf_dir[DIR_LEN] = {0,};
   struct dirent *pFileTop=NULL, *pFileDown=NULL;
   DIR *pDirTop=NULL, *pDirDown=NULL;
   if(!src_url){fputs("in isHit() parameter is null!\n", stderr); return -1;}
@@ -206,7 +206,7 @@ int isHit(char *src_url)
 //  Purpose:  Change present working directory for create file  //
 //            (from hashed url)                                 //
 //////////////////////////////////////////////////////////////////
-int changeDir(char *src_url)
+int changeDir(char *src_url)  //add parameter header
 {
   char path[DIR_LEN];
   char buf[DIR_LEN];
@@ -242,7 +242,7 @@ int changeDir(char *src_url)
 //  5. every log has local time loging                                  //
 //////////////////////////////////////////////////////////////////////////
 int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *fp)
-{
+{ //header
   char hash_dir[HASH_DIR_LEN+1], hash_file[DIR_LEN];
   time_t now;
   struct tm *logTime;
@@ -274,13 +274,9 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
   return 0;
 }
 ///////////////////////////////////////////////////////////////////////////////////
-//  rmChildList                                                                  //
+//  child_handler                                                                //
 //  =============================================================================//
-//  pid_t *child_list -> for parent process has each child process child_list    //
-//  pid_t rm_pid  ->  remove child process from child_list                       //
-//  int user_count  ->  child process(numofclient)                               //
-//  Purpose:                                                                     //
-//  for parent process easy control child process                                //
+//  Purpose : child signal handling                                              //
 ///////////////////////////////////////////////////////////////////////////////////
 static void child_handler()
 {
@@ -290,25 +286,50 @@ static void child_handler()
 
   }
 }
-///////////////////////////////////////////////////////////////////////////////////
-//  writeMsg                                                                     //
-//  =============================================================================//
-//  int sock_fd -> transmission socket file descrypter                           //
-//  char *msg -> message                                                         //
-//  int len -> message length                                                    //
-//  CACHE_ATTR *cache_attr -> message copy for transmission                      //
-//  Prupose:                                                                     //
-//  for write message to socket(client)                                          //
-///////////////////////////////////////////////////////////////////////////////////
-void writeMsg(int sock_fd, char *msg, int len, CACHE_ATTR *cache_attr)
-{
+////////////////////////////////////////////////////////////////////////////////////
+//  cacheResMsg                                                                   //
+//  ==============================================================================//
+//  int sock_fd -> transmission socket file descrypter                            //
+//  char *msg -> message                                                          //
+//                                                                                //
+//  CACHE_ATTR *cache_attr -> message copy for transmission                       //
+//  Prupose:                                                                      //
+//  for cache hit, miss judgement and transmission socket http protocol msg format//
+////////////////////////////////////////////////////////////////////////////////////
+void cacheResMsg(int sock_fd, char *msg, CACHE_ATTR *cache_attr)
+{ //header
+  char response_header[BUF_SIZE] = {0,};
+  char response_message[BUF_SIZE] = {0, };
+  memset(msg, 0, sizeof(char) * BUF_SIZE);
   if(DEF_HIT == cache_attr->flag){
     strcpy(msg, "HIT");
   }else if(DEF_MISS == cache_attr->flag){
     strcpy(msg, "MISS");
   }
-  write(sock_fd, msg, len);
+  sprintf(response_message, "<h1>%s</h1><br>", msg);
+  sprintf(response_header, "HTTP/1.1 200 OK\r\n"
+  "Server: 2018 simple web server\r\n"
+  "Content-length:%lu\r\n"
+  "Content-type:text/html\r\n\r\n", strlen(response_message));
+  write(sock_fd, response_header, strlen(response_header));
+  write(sock_fd, response_message, strlen(response_message));
   return;
+}
+char *requestParsedURL(char *request, char *urlBuf)
+{
+  char tmp[BUF_SIZE] = {0,};
+  char method[20] = {0,};
+  char *tok;
+  strcpy(tmp, request);
+  tok = strtok(tmp, " ");
+  strcpy(method, tok);
+  if(0 == strcmp(method, "GET")){
+    tok = strtok(NULL, " ");  //http://www.~~~.~~~
+    tok = strtok(tok, "/");
+    tok = strtok(NULL, "/");
+    strcpy(urlBuf, tok);
+  }
+  return urlBuf;
 }
 
 int main(int argc, char* argv[])
@@ -403,20 +424,10 @@ int main(int argc, char* argv[])
       strncpy(clnt_ip, inet_ntoa(clnt_addr.sin_addr), sizeof(clnt_ip));
       printf("[%s : %d] client was connected\n", clnt_ip, ntohs(clnt_addr.sin_port));
 
-      while(0 < read(clnt_fd, input_url, sizeof(char) * DIR_LEN)){
+      while(0 < read(clnt_fd, msg, sizeof(char) * DIR_LEN)){
 
-        if(0 == strcmp(input_url, "bye")){
-          printf("[%s : %d] client was disconnected\n", clnt_ip, ntohs(clnt_addr.sin_port));
-          cache_attr.flag = DEF_TER_CHILD;
-
-          writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
-
-          fclose(log_fp);
-          close(clnt_fd);
-          if(input_url) free(input_url);
-          if(hashed_url) free(hashed_url);
-          exit(1);
-        }
+        //Parsed URL logic
+        requestParsedURL(msg, input_url);
         //hit miss logic
         if(0 == sha1_hash(input_url, hashed_url))
           fputs("sha1_hash() failed\n", stderr);
@@ -433,9 +444,13 @@ int main(int argc, char* argv[])
           cache_attr.hit += 1;
           cache_attr.flag = DEF_HIT;
         }
-        writeMsg(clnt_fd, msg, BUF_SIZE, &cache_attr);
+        cacheResMsg(clnt_fd, msg, &cache_attr);
         writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
       }
+      close(clnt_fd);
+      close(serv_fd);
+      fclose(log_fp);
+      break;
     }else{  //parent logic
       //control child process list
       //write log
