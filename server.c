@@ -138,14 +138,14 @@ int makeDir(char *src_url)  //add parameter header
 //  Output: int ->  -1 fail                             //
 //  Purpose:  making file from hashed url               //
 //////////////////////////////////////////////////////////
-int createFile(char *src_url, char *data) //header
+int createFile(char *src_url, char *buf) //header
 {
-  char buf[DIR_LEN];  //file name
+  char file_name[DIR_LEN];  //file name
   int fd;
 
-  memcpy(buf, src_url+HASH_DIR_LEN, (sizeof(char)*DIR_LEN)-HASH_DIR_LEN);
+  memcpy(file_name, src_url+HASH_DIR_LEN, (sizeof(char)*DIR_LEN)-HASH_DIR_LEN);
   //write mode | when no exist file, create file | when file exist, stop func
-  if(0 > (fd = open(buf, O_RDWR | O_CREAT, 0777))){
+  if(0 > (fd = open(file_name, O_RDWR | O_CREAT | O_APPEND, 0777))){
     //when you know error to spacify cause, using 'errno'
     fputs("in createFile(), open() error", stderr);
     return -1;
@@ -153,7 +153,7 @@ int createFile(char *src_url, char *data) //header
 
   //Write File logic, when you want write file, using 'write' func
   //write();
-  write(fd, data, BUF_SIZE);
+  write(fd, buf, strlen(buf));
 
   close(fd);
   return 1;
@@ -293,11 +293,46 @@ static void child_handler()
 void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed_url)
 {
   char response_buf[BUF_SIZE] = {0, };
+  int read_len;
   write(web_sock_fd, request_msg, BUF_SIZE);
-  while(0 < read(web_sock_fd, response_buf, BUF_SIZE)){
+  printf("Send Web : %s\n===============\n", request_msg);
+  while(0 < (read_len = read(web_sock_fd, response_buf, BUF_SIZE))){
+    printf("Receive Web: %s\n=============\n", response_buf);
     createFile(hashed_url, response_buf);
-    write(clnt_fd, response_buf, BUF_SIZE);
+    write(clnt_fd, response_buf, read_len);
   }
+}
+void resClnt(int clnt_sock_fd, char *src_url)
+{
+  char dir_buf[DIR_LEN] = {0, };
+  char file_buf[DIR_LEN] = {0, };
+  char buf[BUF_SIZE] = {0, };
+  DIR *pDirTop = NULL, *pDirDown = NULL;
+  struct dirent *pFileTop = NULL, *pFileDown = NULL;
+  int cache_fd, read_len;
+  if(NULL == (pDirTop = opendir(root_dir))){
+    puts("can't open directory in resClnt()\n");
+    return;
+  }
+  //파일을 cache 디렉토리에서 검색하여 읽어들이고 클라이언트에게 전달한다.
+  for(pFileTop = readdir(pDirTop); pFileTop; pFileTop = readdir(pDirTop)){
+    if(0 == strncmp(src_url, pFileTop->d_name, HASH_DIR_LEN)){
+      pDirDown = opendir(pFileTop->d_name);
+      for(pFileDown = readdir(pDirDown); pFileDown; pFileDown = readdir(pDirDown)){
+        if(0 == strcmp(src_url + 3, pFileDown->d_name)){
+          cache_fd = open(pFileDown->d_name, O_RDONLY);
+          while(0 < (read_len = read(cache_fd, buf, BUF_SIZE))){ //읽은 바이트 수 만큼 client에게 전달
+            write(cache_fd, buf, read_len);
+          }
+          close(cache_fd);
+          closedir(pDirDown);
+          closedir(pDirTop);
+          break;
+        }
+      }
+    }
+  }
+
 }
 
 char *requestParsedURL(char *request, char *urlBuf)
@@ -420,7 +455,7 @@ int main(int argc, char* argv[])
       strncpy(clnt_ip, inet_ntoa(clnt_addr.sin_addr), sizeof(clnt_ip));
       printf("[%s : %d] client was connected\n", clnt_ip, ntohs(clnt_addr.sin_port));
 
-      while(0 < read(clnt_fd, msg, sizeof(char) * DIR_LEN)){
+      while(0 < read(clnt_fd, msg, BUF_SIZE)){
 
         //Parsed URL logic
         requestParsedURL(msg, input_url); //extract host url from request msg
@@ -458,15 +493,19 @@ int main(int argc, char* argv[])
 
           if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
           reqWebResClnt(web_sock_fd, clnt_fd, msg, hashed_url);
-          chdir(path);  //cd ~/cache/
           close(web_sock_fd);
         }else{
           cache_attr.hit += 1;
           cache_attr.flag = DEF_HIT;
           //hit response
+          if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
+          resClnt(clnt_fd, hashed_url);
         }
+        chdir(path);  //cd ~/cache/
         writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
+        break;
       }
+      printf("[%s : %d] client was disconnected\n", clnt_ip, ntohs(clnt_addr.sin_port));
       close(clnt_fd);
       close(serv_fd);
       fclose(log_fp);
