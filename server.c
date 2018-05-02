@@ -296,7 +296,7 @@ void resClnt(int clnt_sock_fd, char *src_url) //if hit, proxy response to clnt t
   }
 }
 
-char *requestParsedURL(char *request, char *urlBuf)
+char *requestParsedHostURL(char *request, char *urlBuf)
 {
   char tmp[BUF_SIZE] = {0,};
   char method[20] = {0,};
@@ -310,6 +310,21 @@ char *requestParsedURL(char *request, char *urlBuf)
     tok = strtok(NULL, "/");
     strcpy(urlBuf, tok);
   }
+  return urlBuf;
+}
+char *requestParsedFullURL(char *request, char *urlBuf)
+{
+  char tmp[BUF_SIZE] = {0, };
+  char method[20] = {0, };
+  char *tok;
+  strcpy(tmp, request);
+  strtok(tmp, " ");   //"GET"
+  tok = strtok(NULL, " ");  //tok = "http://www.~~~.~~"
+
+  strcpy(tmp, tok); //tmp = http://www.~~~.~~~ + message block
+  tok = strtok(tmp, "/");
+  tok = strtok(NULL, " ");  //tok = "/www.~~~.~~~"
+  strcpy(urlBuf, tok + 1);  //tok + 1 = "www.~~~.~~~"
   return urlBuf;
 }
 char *getIPAddr(char *addr)
@@ -327,6 +342,7 @@ int main(int argc, char* argv[])
 {
   int fd; //logfile file descrypter
   int opt = 1;
+  char host_url[DIR_LEN] = {0, };
   char *input_url = 0, *hashed_url = 0;
   char temp[DIR_LEN] = "/cache", path[DIR_LEN], logPath[DIR_LEN]="/logfile";  //concaternate for root dir name var
   CACHE_ATTR cache_attr;
@@ -337,7 +353,7 @@ int main(int argc, char* argv[])
   DIR *pDir = NULL;
 
   //socket variable
-  int clnt_fd, serv_fd, addr_len = 0, msg_len, len_read;
+  int clnt_fd, serv_fd, addr_len = 0;
   struct sockaddr_in serv_addr, clnt_addr;
   char clnt_ip[BUF_SIZE], msg[BUF_SIZE];
 
@@ -419,8 +435,8 @@ int main(int argc, char* argv[])
       while(0 < read(clnt_fd, msg, BUF_SIZE)){
 
         //Parsed URL logic
-        requestParsedURL(msg, input_url); //extract host url from request msg
-
+        requestParsedHostURL(msg, host_url); //extract host url from request msg
+        requestParsedFullURL(msg, input_url);
         //hit miss logic
         if(0 == sha1_hash(input_url, hashed_url))
           fputs("sha1_hash() failed\n", stderr);
@@ -428,7 +444,7 @@ int main(int argc, char* argv[])
         if(DEF_MISS == isHit(hashed_url)){
           //if cache miss, proxy request to web server
           //so, Make socket, request http format message
-          char *ip_addr = getIPAddr(input_url);
+          char *ip_addr = getIPAddr(host_url);
           int web_sock_fd;
           struct sockaddr_in web_serv_addr;
           if(0 > (web_sock_fd = socket(PF_INET, SOCK_STREAM, 0))){
