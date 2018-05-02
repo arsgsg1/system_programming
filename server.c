@@ -131,33 +131,7 @@ int makeDir(char *src_url)  //add parameter header
   return 1;
 }
 
-//////////////////////////////////////////////////////////
-//  createFile                                          //
-//  ==================================================  //
-//  Input:  char* src_url ->  hashed url                //
-//  Output: int ->  -1 fail                             //
-//  Purpose:  making file from hashed url               //
-//////////////////////////////////////////////////////////
-int createFile(char *src_url, char *buf) //header
-{
-  char file_name[DIR_LEN];  //file name
-  int fd;
 
-  memcpy(file_name, src_url+HASH_DIR_LEN, (sizeof(char)*DIR_LEN)-HASH_DIR_LEN);
-  //write mode | when no exist file, create file | when file exist, stop func
-  if(0 > (fd = open(file_name, O_RDWR | O_CREAT | O_APPEND, 0777))){
-    //when you know error to spacify cause, using 'errno'
-    fputs("in createFile(), open() error", stderr);
-    return -1;
-  }
-
-  //Write File logic, when you want write file, using 'write' func
-  //write();
-  write(fd, buf, strlen(buf));
-
-  close(fd);
-  return 1;
-}
 
 ////////////////////////////////////////////////////
 //  isHit                                         //
@@ -293,46 +267,33 @@ static void child_handler()
 void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed_url)
 {
   char response_buf[BUF_SIZE] = {0, };
-  int read_len;
-  write(web_sock_fd, request_msg, BUF_SIZE);
+  int cache_fd,read_len;
+
+  if(0 > (cache_fd = open(hashed_url+3, O_RDWR | O_CREAT | O_APPEND, 0777))){puts("can't open file in reqWebResClnt()\n");}
+
+  write(web_sock_fd, request_msg, strlen(request_msg));
   printf("Send Web : %s\n===============\n", request_msg);
   while(0 < (read_len = read(web_sock_fd, response_buf, BUF_SIZE))){
     printf("Receive Web: %s\n=============\n", response_buf);
-    createFile(hashed_url, response_buf);
+    write(cache_fd, response_buf, read_len);
     write(clnt_fd, response_buf, read_len);
   }
+  close(cache_fd);
 }
-void resClnt(int clnt_sock_fd, char *src_url)
+void resClnt(int clnt_sock_fd, char *src_url) //if hit, proxy response to clnt that it have cache file
 {
   char dir_buf[DIR_LEN] = {0, };
   char file_buf[DIR_LEN] = {0, };
   char buf[BUF_SIZE] = {0, };
-  DIR *pDirTop = NULL, *pDirDown = NULL;
-  struct dirent *pFileTop = NULL, *pFileDown = NULL;
+  DIR *pDir = NULL;
+  struct dirent *pFile = NULL;
   int cache_fd, read_len;
-  if(NULL == (pDirTop = opendir(root_dir))){
-    puts("can't open directory in resClnt()\n");
-    return;
-  }
-  //파일을 cache 디렉토리에서 검색하여 읽어들이고 클라이언트에게 전달한다.
-  for(pFileTop = readdir(pDirTop); pFileTop; pFileTop = readdir(pDirTop)){
-    if(0 == strncmp(src_url, pFileTop->d_name, HASH_DIR_LEN)){
-      pDirDown = opendir(pFileTop->d_name);
-      for(pFileDown = readdir(pDirDown); pFileDown; pFileDown = readdir(pDirDown)){
-        if(0 == strcmp(src_url + 3, pFileDown->d_name)){
-          cache_fd = open(pFileDown->d_name, O_RDONLY);
-          while(0 < (read_len = read(cache_fd, buf, BUF_SIZE))){ //읽은 바이트 수 만큼 client에게 전달
-            write(cache_fd, buf, read_len);
-          }
-          close(cache_fd);
-          closedir(pDirDown);
-          closedir(pDirTop);
-          break;
-        }
-      }
-    }
-  }
 
+  if(0 > (cache_fd = open(src_url+3, O_RDONLY))){puts("can't open file in resClnt()");}
+
+  while(0 < (read_len = read(cache_fd, buf, BUF_SIZE))){
+    write(clnt_sock_fd, buf, read_len);
+  }
 }
 
 char *requestParsedURL(char *request, char *urlBuf)
