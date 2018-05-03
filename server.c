@@ -28,7 +28,7 @@
 #include <pwd.h>
 extern int h_errno;
 
-#define DIR_LEN        256 //driectory name length
+#define DIR_LEN        1024 //driectory name length
 #define HASH_DIR_LEN   3   //directory size
 #define DEF_HIT        1   //meaning hit
 #define DEF_MISS       0   //meaning miss
