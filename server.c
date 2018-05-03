@@ -441,6 +441,9 @@ int main(int argc, char* argv[])
           fputs("sha1_hash() failed\n", stderr);
 
         if(DEF_MISS == isHit(hashed_url)){
+          int url_fd = open("fullurl.txt", O_RDWR | O_CREAT | O_APPEND, 0777);
+          FILE *url_fp = fdopen(url_fd, "r+");
+          fprintf(url_fp, "%s request url is %s\n", clnt_ip, input_url);
           //if cache miss, proxy request to web server
           //so, Make socket, request http format message
           printf("MISS logic\n");
@@ -451,7 +454,7 @@ int main(int argc, char* argv[])
             printf("can't create socket.\n");
             return -1;
           }
-
+          fclose(url_fp);
           memset(&web_serv_addr, 0, sizeof(web_serv_addr));
           web_serv_addr.sin_family = AF_INET;
           web_serv_addr.sin_addr.s_addr = inet_addr(ip_addr);
