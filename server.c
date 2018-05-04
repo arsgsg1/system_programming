@@ -267,7 +267,7 @@ static void child_handler()
 void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed_url)
 {
   char response_buf[BUF_SIZE] = {0, };
-  int cache_fd,read_len;
+  int cache_fd,read_len, write_len;
 
   if(0 > (cache_fd = open(hashed_url+3, O_RDWR | O_CREAT | O_APPEND, 0777))){puts("can't open file in reqWebResClnt()\n");}
 
@@ -276,7 +276,9 @@ void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed
   while(0 < (read_len = read(web_sock_fd, response_buf, BUF_SIZE))){
     printf("MISS Receive Web: %s\n=============\n", response_buf);
     write(cache_fd, response_buf, read_len);
-    write(clnt_fd, response_buf, read_len);
+    write_len = write(clnt_fd, response_buf, read_len);
+    if(0 > write_len) break;
+    memset(response_buf, 0, sizeof(response_buf));
   }
   close(cache_fd);
 }
@@ -285,12 +287,14 @@ void resClnt(int clnt_sock_fd, char *src_url) //if hit, proxy response to clnt t
   char buf[BUF_SIZE] = {0, };
   DIR *pDir = NULL;
   struct dirent *pFile = NULL;
-  int cache_fd, read_len;
+  int cache_fd, read_len, write_len;
 
   if(0 > (cache_fd = open(src_url+3, O_RDONLY))){puts("can't open file in resClnt()");}
 
   while(0 < (read_len = read(cache_fd, buf, BUF_SIZE))){
-    write(clnt_sock_fd, buf, read_len);
+    write_len = write(clnt_sock_fd, buf, read_len);
+    if(0 > write_len) break;
+    memset(buf, 0, sizeof(buf));
   }
 }
 
