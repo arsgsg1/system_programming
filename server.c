@@ -36,16 +36,28 @@ extern int h_errno;
 #define DEF_TER_SERV  -2   //meaning parent process Terminated
 #define MAX_PROC       500 //child process list length
 #define BUF_SIZE       1024//server sending message buffer size
-#define PORTNO         40000//server communication port with client
+#define PORTNO         38029//server communication port with client
 #define HTTP_PORTNO    80
 #define BACKLOG        10  //listening queue size
+#define STAT_SERV      1
+#define STAT_CHILD     0
 typedef struct _CACHE_ATTR{
   int hit;
   int miss;
   int flag;
   time_t start;
   int numofchild;
+  char input_url[BUF_SIZE];
+  char hashed_url[BUF_SIZE];
 }CACHE_ATTR;
+typedef struct _ST_HANDLER{
+  int clnt_fd;
+  char state;
+  FILE* log_fp;
+}ST_HANDLER;
+
+ST_HANDLER gst_handler;
+CACHE_ATTR gcache_attr;
 /*
   int hit -> for hit counting variable
       miss-> for miss counting variable
@@ -238,13 +250,11 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
   memcpy(hash_file, src_url+3, DIR_LEN-3);
   //if 1 = hit, -1 = Terminated
   if(DEF_HIT == cache_attr->flag){
-    fprintf(fp, "[%s] ServerPID : %d | %s/%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Hit", getpid(), hash_dir, hash_file,
+    fprintf(fp, "[%s] %s/%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Hit", hash_dir, hash_file,
   logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
     fprintf(fp, "[%s]%s\n", "Hit", input_url);
   }else if(DEF_MISS == cache_attr->flag){
-    fprintf(fp, "[%s] ServerPID : %d | %s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Miss", getpid(), input_url, logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
-  }else if(DEF_TER_CHILD == cache_attr->flag){
-    fprintf(fp, "[%s] ServerPID : %d | run time: %ldsec. #request hit : %d, miss : %d\n","Terminated", getpid(), now-cache_attr->start, cache_attr->hit, cache_attr->miss);
+    fprintf(fp, "[%s] %s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Miss", input_url, logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
   }else if(DEF_TER_SERV == cache_attr->flag){
     fprintf(fp, "**SERVER** [%s] run time: %ld sec. #sub process: %d\n", "Terminated", now-cache_attr->start, cache_attr->numofchild);
   }
@@ -256,7 +266,7 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
 //  =============================================================================//
 //  Purpose : child signal handling                                              //
 ///////////////////////////////////////////////////////////////////////////////////
-static void child_handler()
+static void sigchld_handler()
 {
   pid_t child_pid;
   int status;
@@ -264,6 +274,34 @@ static void child_handler()
 
   }
 }
+static void sigint_handler()
+{
+  if(STAT_SERV == gst_handler.state){
+    gcache_attr.flag = DEF_TER_SERV;
+    writeLogFile(gcache_attr.input_url, gcache_attr.hashed_url, &gcache_attr, gst_handler.log_fp);
+  }
+  exit(1);
+}
+static void sigalarm_handler()
+{
+  printf("alarm!!\n");
+  char response_message[BUF_SIZE];
+  char response_header[BUF_SIZE];
+  sprintf(response_message,
+          "<h1>응답없음</h1><br>");
+  sprintf(response_header,
+          "HTTP/1.0 200 OK\r\n"
+          "Server:2018 simple web server\r\n"
+          "Content-length:%lu\r\n"
+          "Content-type:text/html\r\n\r\n", strlen(response_message));
+  //응답 메시지 헤더 작성
+  write(gst_handler.clnt_fd, response_header, strlen(response_header));
+  write(gst_handler.clnt_fd, response_message, strlen(response_message));
+  gcache_attr.flag = DEF_MISS;
+  writeLogFile(gcache_attr.input_url, gcache_attr.hashed_url, &gcache_attr, gst_handler.log_fp);
+  exit(1);
+}
+
 void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed_url)
 {
   char response_buf[BUF_SIZE] = {0, };
@@ -273,10 +311,12 @@ void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed
 
   write(web_sock_fd, request_msg, strlen(request_msg));
   printf("MISS Send Web : %s\n===============\n", request_msg);
+  alarm(10);
   while(0 < (read_len = read(web_sock_fd, response_buf, BUF_SIZE))){
     printf("MISS Receive Web: %s\n=============\n", response_buf);
     write(cache_fd, response_buf, read_len);
     write(clnt_fd, response_buf, read_len);
+    alarm(0);
   }
   close(cache_fd);
 }
@@ -375,6 +415,8 @@ int main(int argc, char* argv[])
   //logfile logic(make logfile directory, time info init)
   memset(&cache_attr, 0, sizeof(cache_attr));
   time(&cache_attr.start); //initialized program start time
+  gcache_attr = cache_attr;
+
   getHomeDir(temp);
   sprintf(temp, "%s/%s", temp, "logfile");
   if(NULL == (pDir = opendir(temp))){
@@ -387,7 +429,8 @@ int main(int argc, char* argv[])
   if(0 > (fd = open(temp, O_RDWR | O_CREAT | O_APPEND, 0777)))
     fputs("in main() open() error!", stderr);
   log_fp = fdopen(fd, "r+");
-
+  gst_handler.log_fp = log_fp;
+  gst_handler.state = STAT_SERV;
   //get process id logic
   parent_pid = getpid();
 
@@ -413,13 +456,17 @@ int main(int argc, char* argv[])
   }
 
   //initialize signal handler
-  signal(SIGCHLD, (void *)child_handler);
+  signal(SIGCHLD, (void *)sigchld_handler);
+  signal(SIGINT, (void *)sigint_handler);
+  signal(SIGALRM, (void *)sigalarm_handler);
 
   while(1){
     memset(&clnt_addr, 0, sizeof(clnt_addr));
     memset(clnt_ip, 0, sizeof(clnt_ip));
     addr_len = sizeof(clnt_addr);
     clnt_fd = accept(serv_fd, (struct sockaddr*)&clnt_addr, &addr_len);
+    gst_handler.clnt_fd = clnt_fd;
+
     if(0 > (child_pid = fork())){
       fputs("can't make process.\n", stderr);
       close(clnt_fd);
@@ -427,6 +474,8 @@ int main(int argc, char* argv[])
       fclose(log_fp);
       break;
     }else if(0 == child_pid){ //child logic
+      gst_handler.state = STAT_CHILD;
+
       time(&cache_attr.start);
       strncpy(clnt_ip, inet_ntoa(clnt_addr.sin_addr), strlen(inet_ntoa(clnt_addr.sin_addr)));
       printf("[%s : %d] client was connected\n", clnt_ip, ntohs(clnt_addr.sin_port));
@@ -439,6 +488,9 @@ int main(int argc, char* argv[])
         //hit miss logic
         if(0 == sha1_hash(input_url, hashed_url))
           fputs("sha1_hash() failed\n", stderr);
+
+        strcpy(gcache_attr.input_url, input_url);
+        strcpy(gcache_attr.hashed_url, hashed_url);
 
         if(DEF_MISS == isHit(hashed_url)){
           //if cache miss, proxy request to web server
@@ -466,6 +518,9 @@ int main(int argc, char* argv[])
 
           cache_attr.miss += 1;
           cache_attr.flag = DEF_MISS;
+
+          gcache_attr = cache_attr;
+
           makeDir(hashed_url);
 
           if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
@@ -475,6 +530,9 @@ int main(int argc, char* argv[])
           printf("HIT logic\n");
           cache_attr.hit += 1;
           cache_attr.flag = DEF_HIT;
+
+          gcache_attr = cache_attr;
+
           //hit response
           if(0 > changeDir(hashed_url)){fputs("changeDir() error\n", stderr); break;}  //cd ~/caache/ef0
           resClnt(clnt_fd, hashed_url);
@@ -491,6 +549,9 @@ int main(int argc, char* argv[])
     }else{  //parent logic
       //control child process list
       //write log
+      //count of child process
+      cache_attr.numofchild += 1;
+      gcache_attr = cache_attr;
       //closing file descrypter
     }
 
