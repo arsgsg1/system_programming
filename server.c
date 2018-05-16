@@ -1,11 +1,11 @@
 ///////////////////////////////////////////////////////////////////
 //  File name : proxy_cache.c                                    //
-//  Date  : 2018/05/01                                           //
+//  Date  : 2018/05/17                                           //
 //  Os    : Ubuntu 16.04 LTS 64bits                              //
 //  Author  : Yun Joa Houng                                      //
 //  Student ID  : 2015722052                                     //
 //  ---------------------------------                            //
-//  Title : System Programming Assignment #2-2 (proxy server)    //
+//  Title : System Programming Assignment #2-3 (proxy server)    //
 //  Descryption : user input url, programe is hashing input url  //
 //                and create directory, file from hashed url     //
 ///////////////////////////////////////////////////////////////////
@@ -28,19 +28,21 @@
 #include <pwd.h>
 extern int h_errno;
 
+#define _DEBUG_
 #define DIR_LEN        1024 //driectory name length
 #define HASH_DIR_LEN   3   //directory size
 #define DEF_HIT        1   //meaning hit
 #define DEF_MISS       0   //meaning miss
 #define DEF_TER_CHILD -1   //meaning child process Terminated
 #define DEF_TER_SERV  -2   //meaning parent process Terminated
-#define MAX_PROC       500 //child process list length
 #define BUF_SIZE       1024//server sending message buffer size
 #define PORTNO         38029//server communication port with client
 #define HTTP_PORTNO    80
 #define BACKLOG        10  //listening queue size
 #define STAT_SERV      1
 #define STAT_CHILD     0
+#define STAT_LOG       1
+#define STAT_NOT_LOG   0
 typedef struct _CACHE_ATTR{
   int hit;
   int miss;
@@ -284,7 +286,6 @@ static void sigint_handler()
 }
 static void sigalarm_handler()
 {
-  printf("alarm!!\n");
   char response_message[BUF_SIZE];
   char response_header[BUF_SIZE];
   sprintf(response_message,
@@ -294,14 +295,36 @@ static void sigalarm_handler()
           "Server:2018 simple web server\r\n"
           "Content-length:%lu\r\n"
           "Content-type:text/html\r\n\r\n", strlen(response_message));
-  //응답 메시지 헤더 작성
   write(gst_handler.clnt_fd, response_header, strlen(response_header));
   write(gst_handler.clnt_fd, response_message, strlen(response_message));
   gcache_attr.flag = DEF_MISS;
   writeLogFile(gcache_attr.input_url, gcache_attr.hashed_url, &gcache_attr, gst_handler.log_fp);
   exit(1);
 }
+char reqFilter(char *request_msg)
+{
+  char tmp[BUF_SIZE] = {0, };
+  char *tok;
+  strcpy(tmp, request_msg);
 
+  tok = strtok(tmp, "\r\n ");
+  while(1){
+    tok = strtok(NULL, "\r\n ,");
+    if(0 == strcmp(tok, "Accept:")){
+      tok = strtok(NULL, "\r\n ,");
+      if(0 == strcmp(tok, "text/html"))
+        return STAT_LOG;
+      else
+        return STAT_NOT_LOG;
+    }
+  }
+
+  if(0 == strcmp(tok, "text/html")){
+    return STAT_LOG;
+  }else{
+    return STAT_NOT_LOG;
+  }
+}
 void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed_url)
 {
   char response_buf[BUF_SIZE] = {0, };
@@ -310,10 +333,15 @@ void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed
   if(0 > (cache_fd = open(hashed_url+3, O_RDWR | O_CREAT | O_APPEND, 0777))){puts("can't open file in reqWebResClnt()\n");}
 
   write(web_sock_fd, request_msg, strlen(request_msg));
+  #if defined(_DEBUG_)
   printf("MISS Send Web : %s\n===============\n", request_msg);
+  #endif
+
   alarm(10);
   while(0 < (read_len = read(web_sock_fd, response_buf, BUF_SIZE))){
+    #if defined(_DEBUG_)
     printf("MISS Receive Web: %s\n=============\n", response_buf);
+    #endif
     write(cache_fd, response_buf, read_len);
     write(clnt_fd, response_buf, read_len);
     alarm(0);
@@ -329,8 +357,15 @@ void resClnt(int clnt_sock_fd, char *src_url) //if hit, proxy response to clnt t
 
   if(0 > (cache_fd = open(src_url+3, O_RDONLY))){puts("can't open file in resClnt()");}
 
+  #if defined(_DEBUG_)
+    printf("Hit response : \n");
+  #endif
+
   while(0 < (read_len = read(cache_fd, buf, BUF_SIZE))){
     write(clnt_sock_fd, buf, read_len);
+    #if defined(_DEBUG_)
+      printf("%s\n===================\n", buf);
+    #endif
   }
 }
 
@@ -342,7 +377,9 @@ char *requestParsedHostURL(char *request, char *urlBuf)
   strcpy(tmp, request);
   tok = strtok(tmp, " ");
   strcpy(method, tok);
-  if(0 == strcmp(method, "GET")){
+  if(0 == strcmp(method, "GET") ||
+    0 == strcmp(method, "POST") ||
+    0 == strcmp(method, "CONNECT")){
     tok = strtok(NULL, " ");  //http://www.~~~.~~~
     tok = strtok(tok, "/");
     tok = strtok(NULL, "/");
@@ -384,10 +421,8 @@ int main(int argc, char* argv[])
   char *input_url = 0, *hashed_url = 0;
   char temp[DIR_LEN] = "/cache", path[DIR_LEN], logPath[DIR_LEN]="/logfile";  //concaternate for root dir name var
   CACHE_ATTR cache_attr;
+  pid_t child_pid;
   FILE *log_fp = 0;
-  pid_t parent_pid, child_pid;
-  pid_t child_list[MAX_PROC];
-  int statloc, user_count = 0, clnt_port = 0;
   DIR *pDir = NULL;
 
   //socket variable
@@ -431,8 +466,6 @@ int main(int argc, char* argv[])
   log_fp = fdopen(fd, "r+");
   gst_handler.log_fp = log_fp;
   gst_handler.state = STAT_SERV;
-  //get process id logic
-  parent_pid = getpid();
 
   //socket setting logic
   if(0 > (serv_fd = socket(PF_INET, SOCK_STREAM, 0))){
@@ -478,9 +511,14 @@ int main(int argc, char* argv[])
 
       time(&cache_attr.start);
       strncpy(clnt_ip, inet_ntoa(clnt_addr.sin_addr), strlen(inet_ntoa(clnt_addr.sin_addr)));
+      #if defined(_DEBUG_)
       printf("[%s : %d] client was connected\n", clnt_ip, ntohs(clnt_addr.sin_port));
-
+      #endif
       while(0 < read(clnt_fd, msg, BUF_SIZE)){
+
+        #if defined(_DEBUG_)
+        printf("request from client : \n%s\n==========\n", msg);
+        #endif
 
         //Parsed URL logic
         requestParsedHostURL(msg, host_url); //extract host url from request msg
@@ -495,7 +533,9 @@ int main(int argc, char* argv[])
         if(DEF_MISS == isHit(hashed_url)){
           //if cache miss, proxy request to web server
           //so, Make socket, request http format message
+          #if defined(_DEBUG_)
           printf("MISS logic\n");
+          #endif
           char *ip_addr = getIPAddr(host_url);
           int web_sock_fd;
           struct sockaddr_in web_serv_addr;
@@ -512,10 +552,6 @@ int main(int argc, char* argv[])
             printf("can't connect.\n");
             return -1;
           }
-          //write request message http format
-
-          //read data from web server
-
           cache_attr.miss += 1;
           cache_attr.flag = DEF_MISS;
 
@@ -527,7 +563,6 @@ int main(int argc, char* argv[])
           reqWebResClnt(web_sock_fd, clnt_fd, msg, hashed_url);
           close(web_sock_fd);
         }else{
-          printf("HIT logic\n");
           cache_attr.hit += 1;
           cache_attr.flag = DEF_HIT;
 
@@ -538,10 +573,13 @@ int main(int argc, char* argv[])
           resClnt(clnt_fd, hashed_url);
         }
         chdir(path);  //cd ~/cache/
-        writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
+        if(STAT_LOG == reqFilter(msg))
+          writeLogFile(input_url, hashed_url, &cache_attr, log_fp);
       }
       //when the child process has NO data to receive
+      #if defined(_DEBUG_)
       printf("[%s : %d] client was disconnected\n", clnt_ip, ntohs(clnt_addr.sin_port));
+      #endif
       close(clnt_fd);
       close(serv_fd);
       fclose(log_fp);
@@ -558,6 +596,8 @@ int main(int argc, char* argv[])
   }
   if(input_url) free(input_url);
   if(hashed_url) free(hashed_url);
+  #if defined(_DEBUG_)
   printf("child process end\n");
+  #endif
   return 0;
 }
