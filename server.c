@@ -235,6 +235,8 @@ int changeDir(char *src_url)  //add parameter header
 //////////////////////////////////////////////////////////////////////////
 int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *fp)
 { //header
+  if(NULL == input_url || NULL == src_url || 0 == strlen(input_url) || 0 == strlen(src_url))
+    return -1;
   char hash_dir[HASH_DIR_LEN+1], hash_file[DIR_LEN];
   time_t now;
   struct tm *logTime;
@@ -266,7 +268,7 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
 ///////////////////////////////////////////////////////////////////////////////////
 //  child_handler                                                                //
 //  =============================================================================//
-//  Purpose : child signal handling                                              //
+//  Purpose : child signal handling, wait child process                          //
 ///////////////////////////////////////////////////////////////////////////////////
 static void sigchld_handler()
 {
@@ -276,6 +278,11 @@ static void sigchld_handler()
 
   }
 }
+///////////////////////////////////////////////////////////////////////////////////
+// sigint_handler                                                                //
+// =======================                                                       //
+// Purpose : sigint signal handling, write log server state                      //
+///////////////////////////////////////////////////////////////////////////////////
 static void sigint_handler()
 {
   if(STAT_SERV == gst_handler.state){
@@ -284,6 +291,12 @@ static void sigint_handler()
   }
   exit(1);
 }
+/////////////////////////////////////////////////////////////////////////////////////////
+//  sigalarm_handler                                                                   //
+//  =======================                                                            //
+//  Purpose : if alarm signal enable, program response to client that '응답없음' message //
+/////////////////////////////////////////////////////////////////////////////////////////
+
 static void sigalarm_handler()
 {
   char response_message[BUF_SIZE];
@@ -301,6 +314,13 @@ static void sigalarm_handler()
   writeLogFile(gcache_attr.input_url, gcache_attr.hashed_url, &gcache_attr, gst_handler.log_fp);
   exit(1);
 }
+//////////////////////////////////////////////////////////////////////////////////////////
+//  reqFilter                                                                           //
+//  ==========================                                                          //
+//  char *request_msg -> parsing text : 'text/html' from client for filtering log       //
+//  ==========================                                                          //
+//  Purpose : filtering log                                                             //
+//////////////////////////////////////////////////////////////////////////////////////////
 char reqFilter(char *request_msg)
 {
   char tmp[BUF_SIZE] = {0, };
@@ -325,6 +345,17 @@ char reqFilter(char *request_msg)
     return STAT_NOT_LOG;
   }
 }
+///////////////////////////////////////////////////////////////////////////////////////
+//  reqWebResClnt                                                                    //
+//  ==================================                                               //
+//  int web_sock_fd -> web server socket file descrypter                             //
+//  int clnt_fd -> client socket file descrypter                                     //
+//  char *request_msg -> request message from client                                 //
+//  char *hashed_url -> input url hashed string                                      //
+//  ==================================                                               //
+//  Purpose : if cache miss, get the web server response data and save cache file    //
+///////////////////////////////////////////////////////////////////////////////////////
+
 void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed_url)
 {
   char response_buf[BUF_SIZE] = {0, };
@@ -337,7 +368,7 @@ void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed
   printf("MISS Send Web : %s\n===============\n", request_msg);
   #endif
 
-  alarm(10);
+  alarm(10);  //if no response while 10 sec, program response '응답없음'
   while(0 < (read_len = read(web_sock_fd, response_buf, BUF_SIZE))){
     #if defined(_DEBUG_)
     printf("MISS Receive Web: %s\n=============\n", response_buf);
@@ -348,6 +379,15 @@ void reqWebResClnt(int web_sock_fd, int clnt_fd, char *request_msg, char *hashed
   }
   close(cache_fd);
 }
+///////////////////////////////////////////////////////////////////////////////////
+//  resClnt                                                                      //
+//  ==========================                                                   //
+//  int clnt_sock_fd -> client socket file descrypter                            //
+//  char *src_url -> hashed input url                                            //
+//  ==========================                                                   //
+//  Purpose : if cache hit, response cache file to client                        //
+///////////////////////////////////////////////////////////////////////////////////
+
 void resClnt(int clnt_sock_fd, char *src_url) //if hit, proxy response to clnt that it have cache file
 {
   char buf[BUF_SIZE] = {0, };
@@ -368,6 +408,14 @@ void resClnt(int clnt_sock_fd, char *src_url) //if hit, proxy response to clnt t
     #endif
   }
 }
+///////////////////////////////////////////////////////////////////////////////////
+//  requestParsedHostURL                                                         //
+//  ================================                                             //
+//  char *request -> request message from client                                 //
+//  char *urlBuf -> extract host url buffer                                      //
+//  ================================                                             //
+//  Purpose : extract host url at client request message                         //
+///////////////////////////////////////////////////////////////////////////////////
 
 char *requestParsedHostURL(char *request, char *urlBuf)
 {
@@ -387,6 +435,15 @@ char *requestParsedHostURL(char *request, char *urlBuf)
   }
   return urlBuf;
 }
+///////////////////////////////////////////////////////////////////////////////////
+//  requestParsedFullURL                                                         //
+//  ====================================                                         //
+//  char *request -> request message from client                                 //
+//  char *urlBuf -> extract Full url buffer                                      //
+//  ====================================                                         //
+//  Purpose : extract host url at client request message                         //
+///////////////////////////////////////////////////////////////////////////////////
+
 char *requestParsedFullURL(char *request, char *urlBuf)
 {
   char tmp[BUF_SIZE] = {0, };
@@ -402,6 +459,14 @@ char *requestParsedFullURL(char *request, char *urlBuf)
   strcpy(urlBuf, tok + 1);  //tok + 1 = "www.~~~.~~~"
   return urlBuf;
 }
+///////////////////////////////////////////////////////////////////////////////////
+//  getIPAddr                                                                    //
+//  ==========================                                                   //
+//  char *addr -> host url                                                       //
+//  ==========================                                                   //
+//  Purpose : change host url to dotted decimal type                             //
+///////////////////////////////////////////////////////////////////////////////////
+
 char *getIPAddr(char *addr)
 {
   struct hostent* hent;
