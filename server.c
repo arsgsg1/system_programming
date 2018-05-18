@@ -235,8 +235,6 @@ int changeDir(char *src_url)  //add parameter header
 //////////////////////////////////////////////////////////////////////////
 int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *fp)
 { //header
-  if(NULL == input_url || NULL == src_url || 0 == strlen(input_url) || 0 == strlen(src_url))
-    return -1;
   char hash_dir[HASH_DIR_LEN+1], hash_file[DIR_LEN];
   time_t now;
   struct tm *logTime;
@@ -254,10 +252,14 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
   memcpy(hash_file, src_url+3, DIR_LEN-3);
   //if 1 = hit, -1 = Terminated
   if(DEF_HIT == cache_attr->flag){
+    if(NULL == input_url || NULL == src_url || 0 == strlen(input_url) || 0 == strlen(src_url))
+      return -1;
     fprintf(fp, "[%s] %s/%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Hit", hash_dir, hash_file,
   logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
     fprintf(fp, "[%s]%s\n", "Hit", input_url);
   }else if(DEF_MISS == cache_attr->flag){
+    if(NULL == input_url || NULL == src_url || 0 == strlen(input_url) || 0 == strlen(src_url))
+      return -1;
     fprintf(fp, "[%s] %s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Miss", input_url, logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
   }else if(DEF_TER_SERV == cache_attr->flag){
     fprintf(fp, "**SERVER** [%s] run time: %ld sec. #sub process: %d\n", "Terminated", now-cache_attr->start, cache_attr->numofchild);
