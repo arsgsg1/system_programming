@@ -22,13 +22,15 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
 #include <signal.h>
 #include <time.h>
 #include <unistd.h>
 #include <pwd.h>
 extern int h_errno;
 
-#define _DEBUG_
+//#define _DEBUG_
 #define DIR_LEN        1024 //driectory name length
 #define HASH_DIR_LEN   3   //directory size
 #define DEF_HIT        1   //meaning hit
@@ -43,6 +45,8 @@ extern int h_errno;
 #define STAT_CHILD     0
 #define STAT_LOG       1
 #define STAT_NOT_LOG   0
+#define SEM_KEY        38029  //your semaphore key
+
 typedef struct _CACHE_ATTR{
   int hit;
   int miss;
@@ -52,14 +56,24 @@ typedef struct _CACHE_ATTR{
   char input_url[BUF_SIZE];
   char hashed_url[BUF_SIZE];
 }CACHE_ATTR;
+//for log cache attribute
 typedef struct _ST_HANDLER{
   int clnt_fd;
   char state;
   FILE* log_fp;
 }ST_HANDLER;
+//logging for in handler function
 
 ST_HANDLER gst_handler;
 CACHE_ATTR gcache_attr;
+//data copy, using loging
+union semun{
+  int val;
+  struct semid_ds *buf;
+  unsigned short int *array;
+} arg;
+int semid;
+//
 /*
   int hit -> for hit counting variable
       miss-> for miss counting variable
@@ -216,6 +230,40 @@ int changeDir(char *src_url)  //add parameter header
   if(0 > chdir(work)){fputs("in changeDir() chdir() error\n", stderr); return -1;}
   return 1;
 }
+//////////////////////////////////////////////////////////////////
+//  p                                                           //
+//  ==================================                          //
+//  Input : int semid -> semaphore p operation choosing value   //
+//  Purpose : semaphore lock operation                          //
+//////////////////////////////////////////////////////////////////
+void p(int semid)
+{
+  struct sembuf pbuf;
+  pbuf.sem_num = 0;
+  pbuf.sem_op = -1;
+  pbuf.sem_flg = SEM_UNDO;
+  if((semop(semid, &pbuf, 1)) == -1){
+    perror("p : semop failed");
+    exit(1);
+  }
+}
+//////////////////////////////////////////////////////////////////
+//  v                                                           //
+//  ==================================                          //
+//  Input : int semid -> semaphore v operation choosing value   //
+//  Purpose : semaphore unlock operation                        //
+//////////////////////////////////////////////////////////////////
+void v(int semid)
+{
+  struct sembuf vbuf;
+  vbuf.sem_num = 0;
+  vbuf.sem_op = 1;
+  vbuf.sem_flg = SEM_UNDO;
+  if((semop(semid, &vbuf, 1)) == -1){
+    perror("v : semop failed");
+    exit(1);
+  }
+}
 
 //////////////////////////////////////////////////////////////////////////
 //  writeLogFile                                                        //
@@ -243,6 +291,10 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
     fputs("in writeLogFile() File pointer error\n", stderr);
     return -1;
   }
+  printf("*PID# %d is waiting for the semaphore.\n", getpid());
+  p(semid);
+  printf("*PID# %d is in the critical zone.\n", getpid());
+  sleep(5);
 
   time(&now);
   logTime = localtime(&now);
@@ -265,6 +317,9 @@ int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *f
     fprintf(fp, "**SERVER** [%s] run time: %ld sec. #sub process: %d\n", "Terminated", now-cache_attr->start, cache_attr->numofchild);
   }
   fflush(fp);
+
+  printf("*PID# %d is exited the critical zone.\n", getpid());
+  v(semid);
   return 0;
 }
 ///////////////////////////////////////////////////////////////////////////////////
@@ -559,6 +614,17 @@ int main(int argc, char* argv[])
   signal(SIGCHLD, (void *)sigchld_handler);
   signal(SIGINT, (void *)sigint_handler);
   signal(SIGALRM, (void *)sigalarm_handler);
+
+  //semaphore init logic
+  if(-1 == (semid = semget((key_t)SEM_KEY, 1, IPC_CREAT|0666))){
+    perror("semget failed");
+    exit(1);
+  }
+  arg.val = 1;
+  if(-1 == (semctl(semid, 0, SETVAL, arg))){
+    perror("semctl failed");
+    exit(1);
+  }
 
   while(1){
     memset(&clnt_addr, 0, sizeof(clnt_addr));
