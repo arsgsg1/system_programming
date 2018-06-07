@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////
 //  File name : proxy_cache.c                                    //
-//  Date  : 2018/05/17                                           //
+//  Date  : 2018/06/01                                           //
 //  Os    : Ubuntu 16.04 LTS 64bits                              //
 //  Author  : Yun Joa Houng                                      //
 //  Student ID  : 2015722052                                     //
@@ -28,6 +28,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <pthread.h>
 extern int h_errno;
 
 //#define _DEBUG_
@@ -48,31 +49,31 @@ extern int h_errno;
 #define SEM_KEY        38029  //your semaphore key
 
 typedef struct _CACHE_ATTR{
-  int hit;
-  int miss;
-  int flag;
-  time_t start;
+  int hit;    //hit count
+  int miss;   //miss count
+  int flag;   //log file status
+  time_t start; //the time of process start
   int numofchild;
-  char input_url[BUF_SIZE];
-  char hashed_url[BUF_SIZE];
+  char input_url[BUF_SIZE]; //write log file for input_url
+  char hashed_url[BUF_SIZE];  //write log file for hashed_url
 }CACHE_ATTR;
 //for log cache attribute
 typedef struct _ST_HANDLER{
-  int clnt_fd;
-  char state;
-  FILE* log_fp;
+  int clnt_fd;    //signal hanling with client file descrypter to responde
+  char state;     //state = flag
+  FILE* log_fp;   //for write log file
 }ST_HANDLER;
 //logging for in handler function
 
-ST_HANDLER gst_handler;
-CACHE_ATTR gcache_attr;
+ST_HANDLER gst_handler;   //for signal handler
+CACHE_ATTR gcache_attr;   //for signal handler
 //data copy, using loging
 union semun{
   int val;
   struct semid_ds *buf;
   unsigned short int *array;
 } arg;
-int semid;
+int semid;  //for using global semaphore
 //
 /*
   int hit -> for hit counting variable
@@ -264,6 +265,37 @@ void v(int semid)
     exit(1);
   }
 }
+void *thrWriteLog(void *buf)
+{
+  char hash_dir[HASH_DIR_LEN+1], hash_file[DIR_LEN];
+  time_t now = gcache_attr.start;
+  char *input_url = gcache_attr.input_url;
+  char *src_url = gcache_attr.hashed_url;
+  FILE *fp = gst_handler.log_fp;
+  CACHE_ATTR *cache_attr = &gcache_attr;
+
+  time(&now);
+  struct tm *logTime = localtime(&now);
+  memset(hash_dir, 0, sizeof(hash_dir));
+  memset(hash_file, 0, DIR_LEN);
+  memcpy(hash_dir, src_url, HASH_DIR_LEN);
+  memcpy(hash_file, src_url+3, DIR_LEN-3);
+  //if 1 = hit, -1 = Terminated
+  if(DEF_HIT == cache_attr->flag){
+    if(NULL == input_url || NULL == src_url || 0 == strlen(input_url) || 0 == strlen(src_url))
+      return (void*)-1;
+    fprintf(fp, "[%s] %s/%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Hit", hash_dir, hash_file,
+  logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
+    fprintf(fp, "[%s]%s\n", "Hit", input_url);
+  }else if(DEF_MISS == cache_attr->flag){
+    if(NULL == input_url || NULL == src_url || 0 == strlen(input_url) || 0 == strlen(src_url))
+      return (void*)-1;
+    fprintf(fp, "[%s] %s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Miss", input_url, logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
+  }else if(DEF_TER_SERV == cache_attr->flag){
+    fprintf(fp, "**SERVER** [%s] run time: %ld sec. #sub process: %d\n", "Terminated", now-cache_attr->start, cache_attr->numofchild);
+  }
+  fflush(fp);
+}
 
 //////////////////////////////////////////////////////////////////////////
 //  writeLogFile                                                        //
@@ -282,44 +314,27 @@ void v(int semid)
 //  5. every log has local time loging                                  //
 //////////////////////////////////////////////////////////////////////////
 int writeLogFile(char *input_url, char *src_url, CACHE_ATTR *cache_attr, FILE *fp)
-{ //header
-  char hash_dir[HASH_DIR_LEN+1], hash_file[DIR_LEN];
-  time_t now;
-  struct tm *logTime;
+{
+  pthread_t tid;
+  void *tret;
 
   if(NULL == fp){
     fputs("in writeLogFile() File pointer error\n", stderr);
     return -1;
   }
   printf("*PID# %d is waiting for the semaphore.\n", getpid());
-  p(semid);
+  p(semid); //p operation start, process lock
   printf("*PID# %d is in the critical zone.\n", getpid());
+
+  pthread_create(&tid, NULL, thrWriteLog, NULL);
+  printf("*PID# %d create the *TID# %ld.\n", getpid(), tid);
+  pthread_join(tid, &tret);
+  printf("*TID# %ld is extied\n", tid);
+
   sleep(5);
 
-  time(&now);
-  logTime = localtime(&now);
-  memset(hash_dir, 0, sizeof(hash_dir));
-  memset(hash_file, 0, DIR_LEN);
-  memcpy(hash_dir, src_url, HASH_DIR_LEN);
-  memcpy(hash_file, src_url+3, DIR_LEN-3);
-  //if 1 = hit, -1 = Terminated
-  if(DEF_HIT == cache_attr->flag){
-    if(NULL == input_url || NULL == src_url || 0 == strlen(input_url) || 0 == strlen(src_url))
-      return -1;
-    fprintf(fp, "[%s] %s/%s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Hit", hash_dir, hash_file,
-  logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
-    fprintf(fp, "[%s]%s\n", "Hit", input_url);
-  }else if(DEF_MISS == cache_attr->flag){
-    if(NULL == input_url || NULL == src_url || 0 == strlen(input_url) || 0 == strlen(src_url))
-      return -1;
-    fprintf(fp, "[%s] %s-[%02d/%02d/%02d, %02d:%02d:%02d]\n","Miss", input_url, logTime->tm_year+1900, logTime->tm_mon+1, logTime->tm_mday, logTime->tm_hour, logTime->tm_min, logTime->tm_sec);
-  }else if(DEF_TER_SERV == cache_attr->flag){
-    fprintf(fp, "**SERVER** [%s] run time: %ld sec. #sub process: %d\n", "Terminated", now-cache_attr->start, cache_attr->numofchild);
-  }
-  fflush(fp);
-
   printf("*PID# %d is exited the critical zone.\n", getpid());
-  v(semid);
+  v(semid); //v operation start process unlock
   return 0;
 }
 ///////////////////////////////////////////////////////////////////////////////////
@@ -617,11 +632,13 @@ int main(int argc, char* argv[])
 
   //semaphore init logic
   if(-1 == (semid = semget((key_t)SEM_KEY, 1, IPC_CREAT|0666))){
+    //get semaphore
     perror("semget failed");
     exit(1);
   }
   arg.val = 1;
   if(-1 == (semctl(semid, 0, SETVAL, arg))){
+    //semaphore attribute initialize
     perror("semctl failed");
     exit(1);
   }
@@ -660,8 +677,8 @@ int main(int argc, char* argv[])
         if(0 == sha1_hash(input_url, hashed_url))
           fputs("sha1_hash() failed\n", stderr);
 
-        strcpy(gcache_attr.input_url, input_url);
-        strcpy(gcache_attr.hashed_url, hashed_url);
+        strcpy(cache_attr.input_url, input_url);
+        strcpy(cache_attr.hashed_url, hashed_url);
 
         if(DEF_MISS == isHit(hashed_url)){
           //if cache miss, proxy request to web server
